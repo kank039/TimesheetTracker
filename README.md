@@ -24,7 +24,7 @@ Weekends are automatically ignored.
 
 🌴 Out of Office (OOF) Mode: Right-click the system tray to mark a day as "Personal Leave," completely silencing all reminders until tomorrow.
 
-📊 One-Click Export & Clean: Generates a perfectly formatted Excel (.xlsx) file matching the rigid RAM - Project Transcend 2026 template, with an automated database cleanup option for the next cycle.
+📊 One-Click Export: Generates a perfectly formatted Excel (.xlsx) file matching the rigid RAM - Project Transcend 2026 template and saves it next to the app when the save dialog is unavailable.
 
 🛠️ Modes of Operation
 Timesheet Tracker automatically adapts to your Windows environment and IT permissions.
@@ -57,7 +57,7 @@ Manual Log: Force a log entry (great for bulk-logging 8 hours at once).
 
 Mark Today as Leave (OOF): Silence the tracker for sick days or PTO.
 
-Export & Clean: Generate the Excel (.xlsx) file for the HR portal and optionally wipe the database for a fresh week/month.
+Export: Generate the Excel (.xlsx) file for the HR portal without clearing the database, so older entries remain available for future exports.
 
 Quit: Force close the background daemon.
 
@@ -66,7 +66,7 @@ If you wish to modify the code and compile it yourself:
 
 Bash
 # 1. Install dependencies
-pip install pandas pystray Pillow pyinstaller
+pip install pandas pystray Pillow pyinstaller openpyxl
 
 # 2. Compile to a single .exe
 pyinstaller --noconsole --onefile --name "TimesheetTracker" gui_app.py

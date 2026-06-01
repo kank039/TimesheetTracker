@@ -86,6 +86,11 @@ def show_logging_form(unlogged_hours, today_str):
     ttk.Button(root, text="Submit Log", command=submit_entry).pack(pady=15)
     root.mainloop()
 
+def get_export_folder():
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
 def export_gui_flow():
     if not os.path.exists(DB_NAME): return
 
@@ -106,23 +111,30 @@ def export_gui_flow():
     df.columns = ['Project', 'Activity', 'Date(dd-MM-yyyy)', 'Time Spent(hh)', 'Time Spent (mm)', 'Tag', 'Description']
     df['Date(dd-MM-yyyy)'] = pd.to_datetime(df['Date(dd-MM-yyyy)']).dt.strftime('%d-%m-%Y')
 
-    file_path = filedialog.asksaveasfilename(
-        parent=root,
-        defaultextension=".xlsx",
-        filetypes=[("Excel Files", "*.xlsx")],
-        title="Save Timesheet As",
-        confirmoverwrite=True
-    )
-    if file_path:
-        if not file_path.lower().endswith(".xlsx"):
-            file_path = f"{file_path}.xlsx"
+    export_folder = get_export_folder()
+    export_name = f"TimesheetTracker_Export_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    file_path = os.path.join(export_folder, export_name)
+
+    try:
         df.to_excel(file_path, index=False)
-        if messagebox.askyesno("Cleanup", "Export successful!\n\nDo you want to clear the old data (Fresh start)?", parent=root):
-            conn = sqlite3.connect(DB_NAME)
-            conn.execute("DELETE FROM timesheet")
-            conn.commit()
-            conn.close()
-            messagebox.showinfo("Cleanup", "Database cleared for the next cycle.", parent=root)
+        messagebox.showinfo("Export", f"Export successful!\n\nSaved to:\n{file_path}", parent=root)
+    except Exception as exc:
+        fallback_path = filedialog.asksaveasfilename(
+            parent=root,
+            initialdir=export_folder,
+            initialfile=export_name,
+            defaultextension=".xlsx",
+            filetypes=[("Excel Files", "*.xlsx")],
+            title="Save Timesheet As",
+            confirmoverwrite=True
+        )
+        if fallback_path:
+            if not fallback_path.lower().endswith(".xlsx"):
+                fallback_path = f"{fallback_path}.xlsx"
+            df.to_excel(fallback_path, index=False)
+            messagebox.showinfo("Export", f"Export successful!\n\nSaved to:\n{fallback_path}", parent=root)
+        else:
+            messagebox.showerror("Export Failed", f"Could not export the file.\n\n{exc}", parent=root)
     root.destroy()
 
 # ==========================================
