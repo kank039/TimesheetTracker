@@ -38,6 +38,7 @@ from core_engine import (
     add_timesheet_entry,
     get_logged_hours_for_day,
     get_recent_activities,
+    get_remaining_hours_for_day,
     get_unlogged_hours,
     is_month_end_freeze,
     record_recent_activity,
@@ -148,10 +149,10 @@ def export_timesheet(parent=None):
 
 
 class ManualLogDialog(QDialog):
-    def __init__(self, unlogged_hours, today_str, parent=None):
+    def __init__(self, remaining_hours, today_str, parent=None):
         super().__init__(parent)
         self.today_str = today_str
-        self.unlogged_hours = unlogged_hours
+        self.remaining_hours = remaining_hours
 
         self.setWindowTitle("Timesheet Reminder")
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
@@ -159,7 +160,7 @@ class ManualLogDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
-        info_label = QLabel(f"You have {unlogged_hours} unlogged hours.")
+        info_label = QLabel(f"You have {remaining_hours} hours remaining to log today.")
         info_label.setWordWrap(True)
         layout.addWidget(info_label)
 
@@ -170,7 +171,7 @@ class ManualLogDialog(QDialog):
         form.addRow("Activity:", self.activity_combo)
 
         self.hours_spin = QSpinBox()
-        max_allowed = min(MAX_HOURS_PER_ENTRY, unlogged_hours)
+        max_allowed = remaining_hours
         self.hours_spin.setRange(1, max_allowed)
         self.hours_spin.setValue(max_allowed)
         form.addRow("Hours:", self.hours_spin)
@@ -219,7 +220,17 @@ class ManualLogDialog(QDialog):
             return
 
         try:
-            add_timesheet_entry(VALID_PROJECTS[0], activity, self.today_str, hours, description)
+            remaining_hours = get_remaining_hours_for_day(self.today_str)
+            if hours > remaining_hours:
+                show_box(self, QMessageBox.Warning, "Warning", f"Only {remaining_hours} hours remain for today.")
+                return
+
+            hours_left = hours
+            while hours_left > 0:
+                chunk = min(MAX_HOURS_PER_ENTRY, hours_left)
+                add_timesheet_entry(VALID_PROJECTS[0], activity, self.today_str, chunk, description)
+                hours_left -= chunk
+
             record_recent_activity(activity)
             total_now = get_logged_hours_for_day(self.today_str)
             if total_now >= MAX_HOURS_PER_DAY:
@@ -286,12 +297,12 @@ class TimesheetController(QWidget):
 
     def show_manual_log(self):
         today_str = datetime.datetime.now().strftime("%Y-%m-%d")
-        unlogged_hours = get_unlogged_hours(today_str)
-        if unlogged_hours <= 0:
-            show_box(self, QMessageBox.Information, "All Good!", "You have 0 unlogged hours for today.")
+        remaining_hours = get_remaining_hours_for_day(today_str)
+        if remaining_hours <= 0:
+            show_box(self, QMessageBox.Information, "All Good!", "You have 0 hours remaining for today.")
             return
 
-        dialog = ManualLogDialog(unlogged_hours, today_str, self)
+        dialog = ManualLogDialog(remaining_hours, today_str, self)
         dialog.exec()
 
     def mark_today_leave(self):

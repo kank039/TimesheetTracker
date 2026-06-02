@@ -199,6 +199,9 @@ def get_logged_hours_for_day(date_str):
     conn.close()
     return result if result else 0
 
+def get_remaining_hours_for_day(date_str):
+    return max(0, MAX_HOURS_PER_DAY - get_logged_hours_for_day(date_str))
+
 def get_unlogged_hours(date_str, current_time=None):
     if is_weekend(date_str) or is_leave_or_holiday(date_str):
         return 0
