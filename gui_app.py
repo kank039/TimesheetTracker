@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMenu,
     QMessageBox,
+    QFileDialog,
     QScrollArea,
     QPushButton,
     QSpinBox,
@@ -114,7 +115,7 @@ def ask_yes_no(parent, title, text):
     return result == QMessageBox.StandardButton.Yes
 
 
-def export_timesheet(parent=None):
+def export_timesheet(parent=None, prompt_for_path=True):
     if not os.path.exists(DB_NAME):
         show_box(parent, QMessageBox.Warning, "Export", "Timesheet database not found.")
         return None
@@ -141,9 +142,21 @@ def export_timesheet(parent=None):
     ]
     df["Date(dd-MM-yyyy)"] = pd.to_datetime(df["Date(dd-MM-yyyy)"]).dt.strftime("%d-%m-%Y")
 
-    export_folder = get_export_folder()
     export_name = f"TimesheetTracker_Export_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-    export_path = os.path.join(export_folder, export_name)
+    export_path = os.path.join(get_export_folder(), export_name)
+
+    if prompt_for_path:
+        selected_path, _ = QFileDialog.getSaveFileName(
+            parent,
+            "Save Export As",
+            export_path,
+            "Excel Workbook (*.xlsx)",
+        )
+        if not selected_path:
+            return None
+        if not selected_path.lower().endswith(".xlsx"):
+            selected_path += ".xlsx"
+        export_path = selected_path
 
     try:
         df.to_excel(export_path, index=False)
@@ -557,7 +570,7 @@ class TimesheetController(QWidget):
             show_box(self, QMessageBox.Information, "Rest Up!", "Today is marked as leave. The tracker is muted until tomorrow.")
 
     def export_now(self):
-        export_timesheet(self)
+        export_timesheet(self, prompt_for_path=True)
 
     def quit_app(self):
         self.tray_icon.hide()
@@ -578,7 +591,7 @@ class TimesheetController(QWidget):
             if now.hour == 10:
                 show_box(self, QMessageBox.Warning, "ALERT", "Portal freezes EOD today!")
             elif now.hour == 19:
-                export_timesheet(self)
+                export_timesheet(self, prompt_for_path=False)
                 return
 
         unlogged_hours = get_unlogged_hours(today_str)

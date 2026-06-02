@@ -24,7 +24,7 @@ Weekends are automatically ignored.
 
 🌴 Out of Office (OOF) Mode: Use the Qt system tray menu to mark a day as "Personal Leave," completely silencing all reminders until tomorrow.
 
-📊 One-Click Export: Generates a perfectly formatted Excel (.xlsx) file matching the rigid RAM - Project Transcend 2026 template and saves it next to the app automatically.
+📊 One-Click Export: Generates a perfectly formatted Excel (.xlsx) file matching the rigid RAM - Project Transcend 2026 template and lets you choose where to save it.
 
 🖥️ PySide6 UI: Uses native Qt dialogs and tray integration to avoid the Windows Explorer save-window issues seen in the Tkinter build.
 
@@ -63,7 +63,7 @@ Old-day edits must still total 8 hours for the selected date, and no single row 
 
 Mark Today as Leave (OOF): Silence the tracker for sick days or PTO.
 
-Export: Generate the Excel (.xlsx) file for the HR portal without clearing the database, so older entries remain available for future exports.
+Export: Generate the Excel (.xlsx) file for the HR portal without clearing the database, so older entries remain available for future exports. Manual export now lets you choose the save location.
 
 Quit: Force close the background daemon.
 
@@ -81,7 +81,7 @@ pyinstaller --noconsole --onefile --name "TimesheetTracker" --icon=app.ico --ver
 [v1.2.0] - PySide6 UI Rewrite
 Changed: Replaced Tkinter and pystray with a single PySide6 event loop.
 
-Changed: Export now saves directly to the executable folder as an Excel file without opening the Windows Explorer save dialog.
+Changed: Export now opens a save dialog so you can choose the destination for the Excel file.
 
 Changed: Export success and error dialogs now use Qt-native modal windows.
 
