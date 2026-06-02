@@ -126,6 +126,12 @@ def setup_database():
         )
     ''')
     cursor.execute('''
+        CREATE TABLE IF NOT EXISTS recent_activities (
+            activity TEXT PRIMARY KEY,
+            last_used_at INTEGER NOT NULL
+        )
+    ''')
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS leaves (
             leave_date TEXT PRIMARY KEY,
             leave_type TEXT NOT NULL
@@ -152,6 +158,38 @@ def add_leave(date_str, leave_type="Personal Leave"):
     cursor.execute('INSERT OR REPLACE INTO leaves (leave_date, leave_type) VALUES (?, ?)', (date_str, leave_type))
     conn.commit()
     conn.close()
+
+def record_recent_activity(activity):
+    if activity not in VALID_ACTIVITIES:
+        return
+
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute(
+        '''
+        INSERT OR REPLACE INTO recent_activities (activity, last_used_at)
+        VALUES (?, ?)
+        ''',
+        (activity, int(datetime.datetime.now().timestamp())),
+    )
+    conn.commit()
+    conn.close()
+
+def get_recent_activities(limit=5):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute(
+        '''
+        SELECT activity
+        FROM recent_activities
+        ORDER BY last_used_at DESC
+        LIMIT ?
+        ''',
+        (limit,),
+    )
+    activities = [row[0] for row in cursor.fetchall()]
+    conn.close()
+    return activities
 
 def get_logged_hours_for_day(date_str):
     conn = sqlite3.connect(DB_NAME)

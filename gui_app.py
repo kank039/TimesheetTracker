@@ -37,8 +37,10 @@ from core_engine import (
     add_leave,
     add_timesheet_entry,
     get_logged_hours_for_day,
+    get_recent_activities,
     get_unlogged_hours,
     is_month_end_freeze,
+    record_recent_activity,
     setup_database,
 )
 
@@ -164,8 +166,7 @@ class ManualLogDialog(QDialog):
         form = QFormLayout()
 
         self.activity_combo = QComboBox()
-        self.activity_combo.addItems(VALID_ACTIVITIES)
-        self.activity_combo.setCurrentIndex(1 if len(VALID_ACTIVITIES) > 1 else 0)
+        self.populate_activity_combo()
         form.addRow("Activity:", self.activity_combo)
 
         self.hours_spin = QSpinBox()
@@ -194,6 +195,20 @@ class ManualLogDialog(QDialog):
 
         layout.addLayout(button_row)
 
+    def populate_activity_combo(self):
+        recent_activities = [activity for activity in get_recent_activities() if activity in VALID_ACTIVITIES]
+        remaining_activities = [activity for activity in VALID_ACTIVITIES if activity not in recent_activities]
+
+        if recent_activities:
+            self.activity_combo.addItems(recent_activities)
+            if remaining_activities:
+                self.activity_combo.insertSeparator(self.activity_combo.count())
+
+        self.activity_combo.addItems(remaining_activities)
+
+        if self.activity_combo.count() > 0:
+            self.activity_combo.setCurrentIndex(0)
+
     def submit_entry(self):
         activity = self.activity_combo.currentText().strip()
         hours = int(self.hours_spin.value())
@@ -205,6 +220,7 @@ class ManualLogDialog(QDialog):
 
         try:
             add_timesheet_entry(VALID_PROJECTS[0], activity, self.today_str, hours, description)
+            record_recent_activity(activity)
             total_now = get_logged_hours_for_day(self.today_str)
             if total_now >= MAX_HOURS_PER_DAY:
                 show_box(self, QMessageBox.Information, "Done for the day!", "You have worked enough for today.")
