@@ -1,5 +1,4 @@
-def main():
-    print("Hello from ts!")
+from gui_app import main
 
 
 if __name__ == "__main__":

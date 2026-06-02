@@ -1,35 +1,62 @@
-import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
-import pystray
-from PIL import Image, ImageDraw
-import threading
-import time
 import datetime
-import pandas as pd
-import sqlite3
 import os
-import sys
-import winreg
+import sqlite3
 import subprocess
+import sys
 
-from core_engine import (
-    setup_database, get_unlogged_hours, get_logged_hours_for_day,
-    add_timesheet_entry, is_month_end_freeze, add_leave,
-    VALID_PROJECTS, VALID_ACTIVITIES, MAX_HOURS_PER_ENTRY, MAX_HOURS_PER_DAY,
-    DB_NAME, CURRENT_MODE, IS_FIRST_RUN
+import pandas as pd
+import winreg
+from PySide6.QtCore import QTimer, Qt
+from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
+from PySide6.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QDialog,
+    QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMenu,
+    QMessageBox,
+    QPushButton,
+    QSpinBox,
+    QTextEdit,
+    QSystemTrayIcon,
+    QVBoxLayout,
+    QWidget,
 )
 
-# ==========================================
-# WINDOWS STARTUP PERSISTENCE
-# ==========================================
+from core_engine import (
+    DB_NAME,
+    CURRENT_MODE,
+    IS_FIRST_RUN,
+    MAX_HOURS_PER_DAY,
+    MAX_HOURS_PER_ENTRY,
+    VALID_ACTIVITIES,
+    VALID_PROJECTS,
+    add_leave,
+    add_timesheet_entry,
+    get_logged_hours_for_day,
+    get_unlogged_hours,
+    is_month_end_freeze,
+    setup_database,
+)
+
+
 def setup_persistence():
-    if sys.platform != 'win32': return
-    
-    app_path = sys.executable if getattr(sys, 'frozen', False) else os.path.abspath(__file__)
+    if sys.platform != "win32":
+        return
+
+    app_path = sys.executable if getattr(sys, "frozen", False) else os.path.abspath(__file__)
     app_name = "TimesheetTracker"
 
     try:
-        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run', 0, winreg.KEY_SET_VALUE)
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Run",
+            0,
+            winreg.KEY_SET_VALUE,
+        )
         winreg.SetValueEx(key, app_name, 0, winreg.REG_SZ, app_path)
         winreg.CloseKey(key)
         return
@@ -42,177 +69,269 @@ def setup_persistence():
     except Exception:
         pass
 
-# ==========================================
-# GUI FORMS & EXPORT
-# ==========================================
-def show_logging_form(unlogged_hours, today_str):
-    root = tk.Tk()
-    root.title("Timesheet Reminder")
-    root.geometry("400x350")
-    root.attributes('-topmost', True)
-    root.resizable(False, False)
-
-    ttk.Label(root, text=f"You have {unlogged_hours} unlogged hours.", font=("Arial", 12, "bold")).pack(pady=10)
-    
-    ttk.Label(root, text="Select Activity:").pack(anchor="w", padx=20)
-    activity_var = tk.StringVar(value=VALID_ACTIVITIES[1])
-    ttk.Combobox(root, textvariable=activity_var, values=VALID_ACTIVITIES, state="readonly", width=40).pack(pady=5)
-
-    max_allowed = min(MAX_HOURS_PER_ENTRY, unlogged_hours)
-    ttk.Label(root, text=f"Hours (Max {max_allowed}):").pack(anchor="w", padx=20)
-    hours_var = tk.IntVar(value=max_allowed)
-    ttk.Spinbox(root, from_=1, to=max_allowed, textvariable=hours_var, width=10).pack(pady=5, anchor="w", padx=20)
-
-    ttk.Label(root, text="Description:").pack(anchor="w", padx=20)
-    desc_text = tk.Text(root, height=4, width=42)
-    desc_text.pack(pady=5)
-
-    def submit_entry():
-        act, hrs, desc = activity_var.get(), hours_var.get(), desc_text.get("1.0", tk.END).strip()
-        if not desc:
-            messagebox.showwarning("Warning", "Description cannot be empty.", parent=root)
-            return
-        try:
-            add_timesheet_entry(VALID_PROJECTS[0], act, today_str, hrs, desc)
-            total_now = get_logged_hours_for_day(today_str)
-            if total_now >= MAX_HOURS_PER_DAY:
-                messagebox.showinfo("Done for the day!", "🎉 Hurray you have worked enough go home now!", parent=root)
-            else:
-                messagebox.showinfo("Success", f"Logged {hrs} hours successfully! Total today: {total_now}/8", parent=root)
-            root.destroy()
-        except Exception as e:
-            messagebox.showerror("Error", str(e), parent=root)
-
-    ttk.Button(root, text="Submit Log", command=submit_entry).pack(pady=15)
-    root.mainloop()
 
 def get_export_folder():
-    if getattr(sys, 'frozen', False):
+    if getattr(sys, "frozen", False):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
 
-def export_gui_flow():
-    if not os.path.exists(DB_NAME): return
+
+def create_app_icon():
+    pixmap = QPixmap(64, 64)
+    pixmap.fill(QColor("#0078d7"))
+    painter = QPainter(pixmap)
+    painter.fillRect(16, 16, 32, 32, QColor("white"))
+    painter.end()
+    return QIcon(pixmap)
+
+
+def show_box(parent, icon, title, text):
+    box = QMessageBox(parent)
+    box.setIcon(icon)
+    box.setWindowTitle(title)
+    box.setText(text)
+    box.setStandardButtons(QMessageBox.StandardButton.Ok)
+    box.exec()
+
+
+def ask_yes_no(parent, title, text):
+    result = QMessageBox.question(
+        parent,
+        title,
+        text,
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        QMessageBox.StandardButton.No,
+    )
+    return result == QMessageBox.StandardButton.Yes
+
+
+def export_timesheet(parent=None):
+    if not os.path.exists(DB_NAME):
+        show_box(parent, QMessageBox.Warning, "Export", "Timesheet database not found.")
+        return None
 
     conn = sqlite3.connect(DB_NAME)
-    df = pd.read_sql_query("SELECT project, activity, log_date, hours, minutes, tag, description FROM timesheet ORDER BY log_date ASC", conn)
+    df = pd.read_sql_query(
+        "SELECT project, activity, log_date, hours, minutes, tag, description FROM timesheet ORDER BY log_date ASC",
+        conn,
+    )
     conn.close()
 
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes('-topmost', True)
-    root.update_idletasks()
-    
     if df.empty:
-        messagebox.showinfo("Export", "Timesheet database is currently empty.", parent=root)
-        root.destroy()
-        return
+        show_box(parent, QMessageBox.Information, "Export", "Timesheet database is currently empty.")
+        return None
 
-    df.columns = ['Project', 'Activity', 'Date(dd-MM-yyyy)', 'Time Spent(hh)', 'Time Spent (mm)', 'Tag', 'Description']
-    df['Date(dd-MM-yyyy)'] = pd.to_datetime(df['Date(dd-MM-yyyy)']).dt.strftime('%d-%m-%Y')
+    df.columns = [
+        "Project",
+        "Activity",
+        "Date(dd-MM-yyyy)",
+        "Time Spent(hh)",
+        "Time Spent (mm)",
+        "Tag",
+        "Description",
+    ]
+    df["Date(dd-MM-yyyy)"] = pd.to_datetime(df["Date(dd-MM-yyyy)"]).dt.strftime("%d-%m-%Y")
 
     export_folder = get_export_folder()
     export_name = f"TimesheetTracker_Export_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-    file_path = os.path.join(export_folder, export_name)
+    export_path = os.path.join(export_folder, export_name)
 
     try:
-        df.to_excel(file_path, index=False)
-        messagebox.showinfo("Export", f"Export successful!\n\nSaved to:\n{file_path}", parent=root)
+        df.to_excel(export_path, index=False)
+        show_box(parent, QMessageBox.Information, "Export", f"Export successful!\n\nSaved to:\n{export_path}")
+        return export_path
     except Exception as exc:
-        fallback_path = filedialog.asksaveasfilename(
-            parent=root,
-            initialdir=export_folder,
-            initialfile=export_name,
-            defaultextension=".xlsx",
-            filetypes=[("Excel Files", "*.xlsx")],
-            title="Save Timesheet As",
-            confirmoverwrite=True
-        )
-        if fallback_path:
-            if not fallback_path.lower().endswith(".xlsx"):
-                fallback_path = f"{fallback_path}.xlsx"
-            df.to_excel(fallback_path, index=False)
-            messagebox.showinfo("Export", f"Export successful!\n\nSaved to:\n{fallback_path}", parent=root)
+        show_box(parent, QMessageBox.Critical, "Export Failed", f"Could not export the file.\n\n{exc}")
+        return None
+
+
+class ManualLogDialog(QDialog):
+    def __init__(self, unlogged_hours, today_str, parent=None):
+        super().__init__(parent)
+        self.today_str = today_str
+        self.unlogged_hours = unlogged_hours
+
+        self.setWindowTitle("Timesheet Reminder")
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self.setMinimumWidth(420)
+
+        layout = QVBoxLayout(self)
+
+        info_label = QLabel(f"You have {unlogged_hours} unlogged hours.")
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+
+        form = QFormLayout()
+
+        self.activity_combo = QComboBox()
+        self.activity_combo.addItems(VALID_ACTIVITIES)
+        self.activity_combo.setCurrentIndex(1 if len(VALID_ACTIVITIES) > 1 else 0)
+        form.addRow("Activity:", self.activity_combo)
+
+        self.hours_spin = QSpinBox()
+        max_allowed = min(MAX_HOURS_PER_ENTRY, unlogged_hours)
+        self.hours_spin.setRange(1, max_allowed)
+        self.hours_spin.setValue(max_allowed)
+        form.addRow("Hours:", self.hours_spin)
+
+        self.desc_edit = QTextEdit()
+        self.desc_edit.setPlaceholderText("Enter a short description")
+        self.desc_edit.setFixedHeight(110)
+        form.addRow("Description:", self.desc_edit)
+
+        layout.addLayout(form)
+
+        button_row = QHBoxLayout()
+        button_row.addStretch(1)
+
+        submit_button = QPushButton("Submit Log")
+        submit_button.clicked.connect(self.submit_entry)
+        button_row.addWidget(submit_button)
+
+        cancel_button = QPushButton("Cancel")
+        cancel_button.clicked.connect(self.reject)
+        button_row.addWidget(cancel_button)
+
+        layout.addLayout(button_row)
+
+    def submit_entry(self):
+        activity = self.activity_combo.currentText().strip()
+        hours = int(self.hours_spin.value())
+        description = self.desc_edit.toPlainText().strip()
+
+        if not description:
+            show_box(self, QMessageBox.Warning, "Warning", "Description cannot be empty.")
+            return
+
+        try:
+            add_timesheet_entry(VALID_PROJECTS[0], activity, self.today_str, hours, description)
+            total_now = get_logged_hours_for_day(self.today_str)
+            if total_now >= MAX_HOURS_PER_DAY:
+                show_box(self, QMessageBox.Information, "Done for the day!", "You have worked enough for today.")
+            else:
+                show_box(self, QMessageBox.Information, "Success", f"Logged {hours} hours successfully! Total today: {total_now}/8")
+            self.accept()
+        except Exception as exc:
+            show_box(self, QMessageBox.Critical, "Error", str(exc))
+
+
+class TimesheetController(QWidget):
+    def __init__(self, app):
+        super().__init__()
+        self.app = app
+        self.tray_icon = None
+        self.last_tick_key = None
+        self.init_tray()
+        self.init_timer()
+        self.show_first_run_notice()
+
+    def init_tray(self):
+        self.tray_icon = QSystemTrayIcon(create_app_icon(), self.app)
+        self.tray_icon.setToolTip("Timesheet Tracker")
+
+        menu = QMenu()
+
+        manual_log_action = QAction("Manual Log", self)
+        manual_log_action.triggered.connect(self.show_manual_log)
+        menu.addAction(manual_log_action)
+
+        leave_action = QAction("Mark Today as Leave (OOF)", self)
+        leave_action.triggered.connect(self.mark_today_leave)
+        menu.addAction(leave_action)
+
+        menu.addSeparator()
+
+        export_action = QAction("Export", self)
+        export_action.triggered.connect(self.export_now)
+        menu.addAction(export_action)
+
+        quit_action = QAction("Quit", self)
+        quit_action.triggered.connect(self.quit_app)
+        menu.addAction(quit_action)
+
+        self.tray_icon.setContextMenu(menu)
+        self.tray_icon.show()
+
+    def init_timer(self):
+        self.timer = QTimer(self)
+        self.timer.setInterval(60 * 1000)
+        self.timer.timeout.connect(self.check_background_tasks)
+        self.timer.start()
+
+    def show_first_run_notice(self):
+        if not IS_FIRST_RUN:
+            return
+
+        message = f"Welcome to Timesheet Tracker!\n\nYou are running in {CURRENT_MODE} mode.\n"
+        if CURRENT_MODE == "Portable":
+            show_box(self, QMessageBox.Warning, "First Run Setup", message + "\nDatabase and config are stored in the application folder.")
         else:
-            messagebox.showerror("Export Failed", f"Could not export the file.\n\n{exc}", parent=root)
-    root.destroy()
+            show_box(self, QMessageBox.Information, "First Run Setup", message + "\nDatabase is stored in your Windows AppData folder.")
 
-# ==========================================
-# BACKGROUND & SYSTEM TRAY
-# ==========================================
-def background_tracker():
-    while True:
+    def show_manual_log(self):
+        today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+        unlogged_hours = get_unlogged_hours(today_str)
+        if unlogged_hours <= 0:
+            show_box(self, QMessageBox.Information, "All Good!", "You have 0 unlogged hours for today.")
+            return
+
+        dialog = ManualLogDialog(unlogged_hours, today_str, self)
+        dialog.exec()
+
+    def mark_today_leave(self):
+        today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+        if ask_yes_no(
+            self,
+            "Out of Office",
+            "Taking today off?\n\nThis will mute timesheet reminders for the rest of the day.",
+        ):
+            add_leave(today_str)
+            show_box(self, QMessageBox.Information, "Rest Up!", "Today is marked as leave. The tracker is muted until tomorrow.")
+
+    def export_now(self):
+        export_timesheet(self)
+
+    def quit_app(self):
+        self.tray_icon.hide()
+        QApplication.instance().quit()
+
+    def check_background_tasks(self):
         now = datetime.datetime.now()
+        if now.minute != 0 or not (10 <= now.hour <= 19):
+            return
+
+        tick_key = f"{now.strftime('%Y-%m-%d')}:{now.hour}:{now.minute}"
+        if self.last_tick_key == tick_key:
+            return
+        self.last_tick_key = tick_key
+
         today_str = now.strftime("%Y-%m-%d")
+        if is_month_end_freeze(today_str):
+            if now.hour == 10:
+                show_box(self, QMessageBox.Warning, "ALERT", "Portal freezes EOD today!")
+            elif now.hour == 19:
+                export_timesheet(self)
+                return
 
-        if now.minute == 0 and 10 <= now.hour <= 19:
-            unlogged = get_unlogged_hours(today_str)
-            
-            if is_month_end_freeze(today_str):
-                if now.hour == 10:
-                    threading.Thread(target=lambda: messagebox.showwarning("ALERT", "Portal freezes EOD today!")).start()
-                elif now.hour == 19:
-                    threading.Thread(target=export_gui_flow).start()
-                    time.sleep(60) 
-                    continue
+        unlogged_hours = get_unlogged_hours(today_str)
+        if unlogged_hours > 0:
+            dialog = ManualLogDialog(unlogged_hours, today_str, self)
+            dialog.exec()
 
-            if unlogged > 0:
-                show_logging_form(unlogged, today_str)
-        time.sleep(60)
-
-def create_image():
-    image = Image.new('RGB', (64, 64), color=(0, 120, 215))
-    draw = ImageDraw.Draw(image)
-    draw.rectangle((16, 16, 48, 48), fill=(255, 255, 255))
-    return image
-
-def on_manual_log(icon, item):
-    today_str = datetime.datetime.now().strftime("%Y-%m-%d")
-    unlogged = get_unlogged_hours(today_str)
-    if unlogged > 0: show_logging_form(unlogged, today_str)
-    else:
-        root = tk.Tk()
-        root.withdraw()
-        messagebox.showinfo("All Good!", "You have 0 unlogged hours for today.", parent=root)
-        root.destroy()
-
-def on_mark_leave(icon, item):
-    today_str = datetime.datetime.now().strftime("%Y-%m-%d")
-    root = tk.Tk()
-    root.withdraw()
-    if messagebox.askyesno("Out of Office", "Taking today off?\n\nThis will mute timesheet reminders for the rest of the day.", parent=root):
-        add_leave(today_str)
-        messagebox.showinfo("Rest Up!", "Today is marked as leave. The tracker is muted until tomorrow.", parent=root)
-    root.destroy()
-
-def on_export(icon, item): export_gui_flow()
-def on_quit(icon, item): icon.stop(); os._exit(0)
 
 def main():
-    if IS_FIRST_RUN:
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes('-topmost', True)
-        msg = f"Welcome to Timesheet Tracker!\n\nYou are running in {CURRENT_MODE} MODE.\n\n"
-        if CURRENT_MODE == "Portable":
-            msg += "Database/Config are saved in the application folder. Ideal for USB drives."
-            messagebox.showwarning("First Run Setup", msg, parent=root)
-        else:
-            msg += "Database is securely saved in your hidden Windows %APPDATA% folder."
-            messagebox.showinfo("First Run Setup", msg, parent=root)
-        root.destroy()
-
     setup_database()
     setup_persistence()
-    threading.Thread(target=background_tracker, daemon=True).start()
 
-    menu = pystray.Menu(
-        pystray.MenuItem("Manual Log", on_manual_log),
-        pystray.MenuItem("Mark Today as Leave (OOF)", on_mark_leave),
-        pystray.MenuItem("Export & Clean", on_export),
-        pystray.MenuItem("Quit", on_quit)
-    )
-    pystray.Icon("TimesheetTracker", create_image(), "Timesheet Tracker", menu).run()
+    app = QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)
+    app.setApplicationName("TimesheetTracker")
+
+    controller = TimesheetController(app)
+    app.controller = controller
+
+    sys.exit(app.exec())
+
 
 if __name__ == "__main__":
     main()

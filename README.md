@@ -22,9 +22,11 @@ Weekends are automatically ignored.
 
 🚨 Month-End Freeze Alerts: Automatically calculates the final working weekday of the month and triggers high-priority alerts at 10:00 AM and 7:00 PM to ensure you submit before the portal locks.
 
-🌴 Out of Office (OOF) Mode: Right-click the system tray to mark a day as "Personal Leave," completely silencing all reminders until tomorrow.
+🌴 Out of Office (OOF) Mode: Use the Qt system tray menu to mark a day as "Personal Leave," completely silencing all reminders until tomorrow.
 
-📊 One-Click Export: Generates a perfectly formatted Excel (.xlsx) file matching the rigid RAM - Project Transcend 2026 template and saves it next to the app when the save dialog is unavailable.
+📊 One-Click Export: Generates a perfectly formatted Excel (.xlsx) file matching the rigid RAM - Project Transcend 2026 template and saves it next to the app automatically.
+
+🖥️ PySide6 UI: Uses native Qt dialogs and tray integration to avoid the Windows Explorer save-window issues seen in the Tkinter build.
 
 🛠️ Modes of Operation
 Timesheet Tracker automatically adapts to your Windows environment and IT permissions.
@@ -66,11 +68,18 @@ If you wish to modify the code and compile it yourself:
 
 Bash
 # 1. Install dependencies
-pip install pandas pystray Pillow pyinstaller openpyxl
+pip install pandas PySide6 pyinstaller openpyxl
 
 # 2. Compile to a single .exe
-pyinstaller --noconsole --onefile --name "TimesheetTracker" gui_app.py
+pyinstaller --noconsole --onefile --name "TimesheetTracker" main.py
 📝 Changelog
+[v1.2.0] - PySide6 UI Rewrite
+Changed: Replaced Tkinter and pystray with a single PySide6 event loop.
+
+Changed: Export now saves directly to the executable folder as an Excel file without opening the Windows Explorer save dialog.
+
+Changed: Export success and error dialogs now use Qt-native modal windows.
+
 [v1.0.0] - Production Release
 Added: Multi-tier Windows startup persistence (Registry injection with Task Scheduler fallback).
 
@@ -81,13 +90,13 @@ Added: tracker_config.ini generation for explicit environment overrides.
 Added: First-run initialization popups to inform users of their installation mode.
 
 [v0.9.0] - The "Quality of Life" Update
-Added: System Tray (Pystray) integration for silent background operation.
+Added: System Tray integration for silent background operation.
 
 Added: "Mark Today as Leave" feature to bypass the 8-hour expected daily quota.
 
-Added: Custom GUI Tkinter forms that force themselves to the front of the screen.
+Added: Custom GUI dialogs that force themselves to the front of the screen.
 
-Changed: Background daemon now runs on a lightweight separate thread to prevent UI locking.
+Changed: Background daemon now runs in the main Qt event loop to prevent UI locking.
 
 [v0.8.0] - Smart Accumulation & Victory Conditions
 Added: "Go Home" auto-sleep detection. The script stops prompting entirely once 8 hours are logged.
