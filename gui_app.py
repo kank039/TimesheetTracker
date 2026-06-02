@@ -45,12 +45,15 @@ from core_engine import (
     get_logged_hours_for_day,
     get_recent_activities,
     get_remaining_hours_for_day,
+    get_logged_minutes_for_day,
     get_unlogged_hours,
     is_month_end_freeze,
     record_recent_activity,
     replace_timesheet_entries_for_day,
     setup_database,
 )
+
+from single_instance import acquire_single_instance_lock
 
 
 def setup_persistence():
@@ -189,11 +192,20 @@ class ManualLogDialog(QDialog):
         self.populate_activity_combo()
         form.addRow("Activity:", self.activity_combo)
 
+        # remaining_hours may be float (hours). Convert to minutes for precise handling.
+        remaining_minutes = int(round(remaining_hours * 60))
+
         self.hours_spin = QSpinBox()
-        max_allowed = remaining_hours
-        self.hours_spin.setRange(1, max_allowed)
-        self.hours_spin.setValue(max_allowed)
+        max_allowed_hours = remaining_minutes // 60
+        self.hours_spin.setRange(0, max_allowed_hours)
+        self.hours_spin.setValue(max_allowed_hours)
         form.addRow("Hours:", self.hours_spin)
+
+        self.minutes_spin = QSpinBox()
+        self.minutes_spin.setRange(0, 59)
+        default_minutes = remaining_minutes % 60
+        self.minutes_spin.setValue(default_minutes)
+        form.addRow("Minutes:", self.minutes_spin)
 
         self.desc_edit = QTextEdit()
         self.desc_edit.setPlaceholderText("Enter a short description")
@@ -232,6 +244,7 @@ class ManualLogDialog(QDialog):
     def submit_entry(self):
         activity = self.activity_combo.currentText().strip()
         hours = int(self.hours_spin.value())
+        minutes = int(self.minutes_spin.value())
         description = self.desc_edit.toPlainText().strip()
 
         if not description:
@@ -239,23 +252,33 @@ class ManualLogDialog(QDialog):
             return
 
         try:
-            remaining_hours = get_remaining_hours_for_day(self.today_str)
-            if hours > remaining_hours:
-                show_box(self, QMessageBox.Warning, "Warning", f"Only {remaining_hours} hours remain for today.")
+            remaining_minutes = MAX_HOURS_PER_DAY * 60 - get_logged_minutes_for_day(self.today_str)
+            total_minutes = hours * 60 + minutes
+            if total_minutes <= 0:
+                show_box(self, QMessageBox.Warning, "Warning", "Specify a positive time to log.")
+                return
+            if total_minutes > remaining_minutes:
+                rem_h = remaining_minutes // 60
+                rem_m = remaining_minutes % 60
+                show_box(self, QMessageBox.Warning, "Warning", f"Only {rem_h}h {rem_m}m remain for today.")
                 return
 
-            hours_left = hours
-            while hours_left > 0:
-                chunk = min(MAX_HOURS_PER_ENTRY, hours_left)
-                add_timesheet_entry(VALID_PROJECTS[0], activity, self.today_str, chunk, description)
-                hours_left -= chunk
+            minutes_left = total_minutes
+            while minutes_left > 0:
+                chunk = min(MAX_HOURS_PER_ENTRY * 60, minutes_left)
+                chunk_hours = chunk // 60
+                chunk_minutes = chunk % 60
+                add_timesheet_entry(VALID_PROJECTS[0], activity, self.today_str, chunk_hours, chunk_minutes, description)
+                minutes_left -= chunk
 
             record_recent_activity(activity)
-            total_now = get_logged_hours_for_day(self.today_str)
-            if total_now >= MAX_HOURS_PER_DAY:
+            total_now_min = get_logged_minutes_for_day(self.today_str)
+            if total_now_min >= MAX_HOURS_PER_DAY * 60:
                 show_box(self, QMessageBox.Information, "Done for the day!", "You have worked enough for today.")
             else:
-                show_box(self, QMessageBox.Information, "Success", f"Logged {hours} hours successfully! Total today: {total_now}/8")
+                now_h = total_now_min // 60
+                now_m = total_now_min % 60
+                show_box(self, QMessageBox.Information, "Success", f"Logged {hours}h {minutes}m successfully! Total today: {now_h}h {now_m}m / {MAX_HOURS_PER_DAY}h")
             self.accept()
         except Exception as exc:
             show_box(self, QMessageBox.Critical, "Error", str(exc))
@@ -278,14 +301,19 @@ class DayEntryRow(QWidget):
         layout.addWidget(self.activity_combo, 1, 0)
 
         self.hours_spin = QSpinBox()
-        self.hours_spin.setRange(1, MAX_HOURS_PER_ENTRY)
+        self.hours_spin.setRange(0, MAX_HOURS_PER_ENTRY)
         layout.addWidget(QLabel("Hours"), 0, 1)
         layout.addWidget(self.hours_spin, 1, 1)
 
+        self.minutes_spin = QSpinBox()
+        self.minutes_spin.setRange(0, 59)
+        layout.addWidget(QLabel("Minutes"), 0, 2)
+        layout.addWidget(self.minutes_spin, 1, 2)
+
         self.description_edit = QLineEdit()
         self.description_edit.setPlaceholderText("Task description")
-        layout.addWidget(QLabel("Description"), 0, 2)
-        layout.addWidget(self.description_edit, 1, 2)
+        layout.addWidget(QLabel("Description"), 0, 3)
+        layout.addWidget(self.description_edit, 1, 3)
 
         self.remove_button = QPushButton("Remove")
         self.remove_button.clicked.connect(self.handle_remove)
@@ -293,6 +321,7 @@ class DayEntryRow(QWidget):
 
         self.activity_combo.currentIndexChanged.connect(self.emit_change)
         self.hours_spin.valueChanged.connect(self.emit_change)
+        self.minutes_spin.valueChanged.connect(self.emit_change)
         self.description_edit.textChanged.connect(self.emit_change)
 
         if entry:
@@ -302,13 +331,15 @@ class DayEntryRow(QWidget):
 
     def set_entry(self, entry):
         activity = entry.get("activity", "")
-        hours = int(entry.get("hours", 1))
+        hours = int(entry.get("hours", 0))
+        minutes = int(entry.get("minutes", 0))
         description = entry.get("description", "")
 
         activity_index = self.activity_combo.findText(activity)
         if activity_index >= 0:
             self.activity_combo.setCurrentIndex(activity_index)
-        self.hours_spin.setValue(max(1, min(MAX_HOURS_PER_ENTRY, hours)))
+        self.hours_spin.setValue(max(0, min(MAX_HOURS_PER_ENTRY, hours)))
+        self.minutes_spin.setValue(max(0, min(59, minutes)))
         self.description_edit.setText(description)
 
     def get_entry(self):
@@ -316,6 +347,7 @@ class DayEntryRow(QWidget):
             "project": VALID_PROJECTS[0],
             "activity": self.activity_combo.currentText().strip(),
             "hours": int(self.hours_spin.value()),
+            "minutes": int(self.minutes_spin.value()),
             "description": self.description_edit.text().strip(),
         }
 
@@ -441,18 +473,23 @@ class OldDayEditorDialog(QDialog):
         entries = self.collect_entries()
         if not entries:
             return False, "Add at least one task."
-
-        total_hours = 0
+        total_minutes = 0
         for entry in entries:
             if entry["activity"] not in VALID_ACTIVITIES:
                 return False, "Select a valid activity for every row."
             if not entry["description"]:
                 return False, "Description cannot be empty."
-            if entry["hours"] < 1 or entry["hours"] > MAX_HOURS_PER_ENTRY:
-                return False, f"Each row must be between 1 and {MAX_HOURS_PER_ENTRY} hours."
-            total_hours += entry["hours"]
+            hours = int(entry.get("hours", 0))
+            minutes = int(entry.get("minutes", 0))
+            if hours < 0 or hours > MAX_HOURS_PER_ENTRY:
+                return False, f"Each row hours must be between 0 and {MAX_HOURS_PER_ENTRY}."
+            if minutes < 0 or minutes > 59:
+                return False, "Minutes must be between 0 and 59."
+            if hours == 0 and minutes == 0:
+                return False, "Each row must have a positive time value."
+            total_minutes += hours * 60 + minutes
 
-        if total_hours != MAX_HOURS_PER_DAY:
+        if total_minutes != MAX_HOURS_PER_DAY * 60:
             return False, f"Total must equal {MAX_HOURS_PER_DAY} hours."
 
         return True, ""
@@ -462,10 +499,12 @@ class OldDayEditorDialog(QDialog):
             return
 
         entries = self.collect_entries()
-        total_hours = sum(entry["hours"] for entry in entries)
+        total_minutes = sum(entry.get("hours", 0) * 60 + entry.get("minutes", 0) for entry in entries)
+        th = total_minutes // 60
+        tm = total_minutes % 60
         valid, message = self.is_valid()
         self.summary_label.setText(
-            f"Total hours: {total_hours} / {MAX_HOURS_PER_DAY}"
+            f"Total: {th}h {tm}m / {MAX_HOURS_PER_DAY}h"
             + (f"  |  {message}" if not valid and message else "")
         )
         self.submit_button.setEnabled(valid)
@@ -547,12 +586,12 @@ class TimesheetController(QWidget):
 
     def show_manual_log(self):
         today_str = datetime.datetime.now().strftime("%Y-%m-%d")
-        remaining_hours = get_remaining_hours_for_day(today_str)
-        if remaining_hours <= 0:
+        remaining_minutes = MAX_HOURS_PER_DAY * 60 - get_logged_minutes_for_day(today_str)
+        if remaining_minutes <= 0:
             show_box(self, QMessageBox.Information, "All Good!", "You have 0 hours remaining for today.")
             return
 
-        dialog = ManualLogDialog(remaining_hours, today_str, self)
+        dialog = ManualLogDialog(remaining_minutes / 60.0, today_str, self)
         dialog.exec()
 
     def show_old_day_editor(self):
@@ -590,7 +629,7 @@ class TimesheetController(QWidget):
         if is_month_end_freeze(today_str):
             if now.hour == 10:
                 show_box(self, QMessageBox.Warning, "ALERT", "Portal freezes EOD today!")
-            elif now.hour == 19:
+            elif now.hour == 18:
                 export_timesheet(self, prompt_for_path=False)
                 return
 
@@ -601,6 +640,10 @@ class TimesheetController(QWidget):
 
 
 def main():
+    lock = acquire_single_instance_lock()
+    if lock is None:
+        return
+
     setup_database()
     setup_persistence()
 

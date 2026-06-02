@@ -194,10 +194,20 @@ def get_recent_activities(limit=5):
 def get_logged_hours_for_day(date_str):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute("SELECT SUM(hours) FROM timesheet WHERE log_date = ?", (date_str,))
+    cursor.execute("SELECT SUM(hours * 60 + minutes) FROM timesheet WHERE log_date = ?", (date_str,))
     result = cursor.fetchone()[0]
     conn.close()
-    return result if result else 0
+    total_minutes = result if result else 0
+    return total_minutes / 60.0
+
+
+def get_logged_minutes_for_day(date_str):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT SUM(hours * 60 + minutes) FROM timesheet WHERE log_date = ?", (date_str,))
+    result = cursor.fetchone()[0]
+    conn.close()
+    return int(result) if result else 0
 
 def get_remaining_hours_for_day(date_str):
     return max(0, MAX_HOURS_PER_DAY - get_logged_hours_for_day(date_str))
@@ -208,7 +218,7 @@ def get_timesheet_entries_for_day(date_str):
     cursor = conn.cursor()
     cursor.execute(
         '''
-        SELECT id, project, activity, log_date, hours, description
+        SELECT id, project, activity, log_date, hours, minutes, description
         FROM timesheet
         WHERE log_date = ?
         ORDER BY id ASC
@@ -222,7 +232,8 @@ def get_timesheet_entries_for_day(date_str):
             "activity": row[2],
             "log_date": row[3],
             "hours": row[4],
-            "description": row[5],
+            "minutes": row[5],
+            "description": row[6],
         }
         for row in cursor.fetchall()
     ]
@@ -245,22 +256,36 @@ def get_unlogged_hours(date_str, current_time=None):
     logged_hours = get_logged_hours_for_day(date_str)
     return max(0, expected_hours - logged_hours)
 
-def add_timesheet_entry(project, activity, date_str, hours, description):
-    if is_weekend(date_str): raise ValueError("Cannot log hours on a weekend.")
-    if project not in VALID_PROJECTS: raise ValueError("Invalid Project selected.")
-    if activity not in VALID_ACTIVITIES: raise ValueError("Invalid Activity selected.")
-    if hours > MAX_HOURS_PER_ENTRY: raise ValueError(f"Max {MAX_HOURS_PER_ENTRY} hours per entry.")
-    
-    total_today = get_logged_hours_for_day(date_str)
-    if total_today + hours > MAX_HOURS_PER_DAY:
-        raise ValueError(f"Exceeds {MAX_HOURS_PER_DAY} hr daily limit. Remaining: {MAX_HOURS_PER_DAY - total_today} hrs.")
+def add_timesheet_entry(project, activity, date_str, hours, minutes=0, description=""):
+    if is_weekend(date_str):
+        raise ValueError("Cannot log hours on a weekend.")
+    if project not in VALID_PROJECTS:
+        raise ValueError("Invalid Project selected.")
+    if activity not in VALID_ACTIVITIES:
+        raise ValueError("Invalid Activity selected.")
+    if minutes < 0 or minutes > 59:
+        raise ValueError("Minutes must be between 0 and 59.")
+    if hours < 0 or hours > MAX_HOURS_PER_ENTRY:
+        raise ValueError(f"Each entry hours must be between 0 and {MAX_HOURS_PER_ENTRY}.")
+    if hours == 0 and minutes == 0:
+        raise ValueError("Cannot add an empty time entry.")
+    if hours == MAX_HOURS_PER_ENTRY and minutes > 0:
+        raise ValueError(f"Max {MAX_HOURS_PER_ENTRY} hours per entry.")
+
+    total_today_minutes = get_logged_minutes_for_day(date_str)
+    added_minutes = int(hours) * 60 + int(minutes)
+    if total_today_minutes + added_minutes > MAX_HOURS_PER_DAY * 60:
+        remaining_min = MAX_HOURS_PER_DAY * 60 - total_today_minutes
+        rem_h = remaining_min // 60
+        rem_m = remaining_min % 60
+        raise ValueError(f"Exceeds {MAX_HOURS_PER_DAY} hr daily limit. Remaining: {rem_h}h {rem_m}m.")
 
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute('''
         INSERT INTO timesheet (project, activity, log_date, hours, minutes, tag, description)
-        VALUES (?, ?, ?, ?, 0, '', ?)
-    ''', (project, activity, date_str, hours, description))
+        VALUES (?, ?, ?, ?, ?, '', ?)
+    ''', (project, activity, date_str, int(hours), int(minutes), description))
     conn.commit()
     conn.close()
 
@@ -272,43 +297,48 @@ def replace_timesheet_entries_for_day(date_str, entries):
     if not entries:
         raise ValueError("Add at least one task for the day.")
 
-    total_hours = 0
+    total_minutes = 0
     normalized_entries = []
 
     for entry in entries:
         project = entry.get("project", "")
         activity = entry.get("activity", "")
         hours = int(entry.get("hours", 0))
+        minutes = int(entry.get("minutes", 0))
         description = entry.get("description", "").strip()
 
         if project not in VALID_PROJECTS:
             raise ValueError("Invalid Project selected.")
         if activity not in VALID_ACTIVITIES:
             raise ValueError("Invalid Activity selected.")
-        if hours < 1:
-            raise ValueError("Each record must have at least 1 hour.")
-        if hours > MAX_HOURS_PER_ENTRY:
+        if hours < 0:
+            raise ValueError("Each record must have non-negative hours.")
+        if minutes < 0 or minutes > 59:
+            raise ValueError("Minutes must be between 0 and 59.")
+        if hours == 0 and minutes == 0:
+            raise ValueError("Each record must have a positive time value.")
+        if hours > MAX_HOURS_PER_ENTRY or (hours == MAX_HOURS_PER_ENTRY and minutes > 0):
             raise ValueError(f"Max {MAX_HOURS_PER_ENTRY} hours per entry.")
         if not description:
             raise ValueError("Description cannot be empty.")
 
-        total_hours += hours
-        normalized_entries.append((project, activity, hours, description))
+        total_minutes += hours * 60 + minutes
+        normalized_entries.append((project, activity, hours, minutes, description))
 
-    if total_hours != MAX_HOURS_PER_DAY:
+    if total_minutes != MAX_HOURS_PER_DAY * 60:
         raise ValueError(f"Entries for the day must total exactly {MAX_HOURS_PER_DAY} hours.")
 
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     try:
         cursor.execute("DELETE FROM timesheet WHERE log_date = ?", (date_str,))
-        for project, activity, hours, description in normalized_entries:
+        for project, activity, hours, minutes, description in normalized_entries:
             cursor.execute(
                 '''
                 INSERT INTO timesheet (project, activity, log_date, hours, minutes, tag, description)
-                VALUES (?, ?, ?, ?, 0, '', ?)
+                VALUES (?, ?, ?, ?, ?, '', ?)
                 ''',
-                (project, activity, date_str, hours, description),
+                (project, activity, date_str, hours, minutes, description),
             )
         conn.commit()
     except Exception:
