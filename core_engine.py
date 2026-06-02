@@ -202,6 +202,33 @@ def get_logged_hours_for_day(date_str):
 def get_remaining_hours_for_day(date_str):
     return max(0, MAX_HOURS_PER_DAY - get_logged_hours_for_day(date_str))
 
+
+def get_timesheet_entries_for_day(date_str):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute(
+        '''
+        SELECT id, project, activity, log_date, hours, description
+        FROM timesheet
+        WHERE log_date = ?
+        ORDER BY id ASC
+        ''',
+        (date_str,),
+    )
+    entries = [
+        {
+            "id": row[0],
+            "project": row[1],
+            "activity": row[2],
+            "log_date": row[3],
+            "hours": row[4],
+            "description": row[5],
+        }
+        for row in cursor.fetchall()
+    ]
+    conn.close()
+    return entries
+
 def get_unlogged_hours(date_str, current_time=None):
     if is_weekend(date_str) or is_leave_or_holiday(date_str):
         return 0
@@ -236,6 +263,59 @@ def add_timesheet_entry(project, activity, date_str, hours, description):
     ''', (project, activity, date_str, hours, description))
     conn.commit()
     conn.close()
+
+
+def replace_timesheet_entries_for_day(date_str, entries):
+    if is_weekend(date_str):
+        raise ValueError("Cannot log hours on a weekend.")
+
+    if not entries:
+        raise ValueError("Add at least one task for the day.")
+
+    total_hours = 0
+    normalized_entries = []
+
+    for entry in entries:
+        project = entry.get("project", "")
+        activity = entry.get("activity", "")
+        hours = int(entry.get("hours", 0))
+        description = entry.get("description", "").strip()
+
+        if project not in VALID_PROJECTS:
+            raise ValueError("Invalid Project selected.")
+        if activity not in VALID_ACTIVITIES:
+            raise ValueError("Invalid Activity selected.")
+        if hours < 1:
+            raise ValueError("Each record must have at least 1 hour.")
+        if hours > MAX_HOURS_PER_ENTRY:
+            raise ValueError(f"Max {MAX_HOURS_PER_ENTRY} hours per entry.")
+        if not description:
+            raise ValueError("Description cannot be empty.")
+
+        total_hours += hours
+        normalized_entries.append((project, activity, hours, description))
+
+    if total_hours != MAX_HOURS_PER_DAY:
+        raise ValueError(f"Entries for the day must total exactly {MAX_HOURS_PER_DAY} hours.")
+
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM timesheet WHERE log_date = ?", (date_str,))
+        for project, activity, hours, description in normalized_entries:
+            cursor.execute(
+                '''
+                INSERT INTO timesheet (project, activity, log_date, hours, minutes, tag, description)
+                VALUES (?, ?, ?, ?, 0, '', ?)
+                ''',
+                (project, activity, date_str, hours, description),
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 def get_last_working_day(year, month):
     last_day = calendar.monthrange(year, month)[1]

@@ -6,23 +6,27 @@ import sys
 
 import pandas as pd
 import winreg
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import QDate, QTimer, Qt
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
+    QDateEdit,
     QComboBox,
     QDialog,
     QFormLayout,
     QHBoxLayout,
+    QGridLayout,
     QLabel,
     QLineEdit,
     QMenu,
     QMessageBox,
+    QScrollArea,
     QPushButton,
     QSpinBox,
     QTextEdit,
     QSystemTrayIcon,
     QVBoxLayout,
+    QFrame,
     QWidget,
 )
 
@@ -36,12 +40,14 @@ from core_engine import (
     VALID_PROJECTS,
     add_leave,
     add_timesheet_entry,
+    get_timesheet_entries_for_day,
     get_logged_hours_for_day,
     get_recent_activities,
     get_remaining_hours_for_day,
     get_unlogged_hours,
     is_month_end_freeze,
     record_recent_activity,
+    replace_timesheet_entries_for_day,
     setup_database,
 )
 
@@ -154,7 +160,7 @@ class ManualLogDialog(QDialog):
         self.today_str = today_str
         self.remaining_hours = remaining_hours
 
-        self.setWindowTitle("Timesheet Reminder")
+        self.setWindowTitle("Manual Log")
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
         self.setMinimumWidth(420)
 
@@ -242,6 +248,229 @@ class ManualLogDialog(QDialog):
             show_box(self, QMessageBox.Critical, "Error", str(exc))
 
 
+class DayEntryRow(QWidget):
+    def __init__(self, entry=None, on_change=None, on_remove=None, parent=None):
+        super().__init__(parent)
+        self.on_change = on_change
+        self.on_remove = on_remove
+
+        layout = QGridLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setHorizontalSpacing(8)
+        layout.setVerticalSpacing(6)
+
+        self.activity_combo = QComboBox()
+        self.activity_combo.addItems(VALID_ACTIVITIES)
+        layout.addWidget(QLabel("Activity"), 0, 0)
+        layout.addWidget(self.activity_combo, 1, 0)
+
+        self.hours_spin = QSpinBox()
+        self.hours_spin.setRange(1, MAX_HOURS_PER_ENTRY)
+        layout.addWidget(QLabel("Hours"), 0, 1)
+        layout.addWidget(self.hours_spin, 1, 1)
+
+        self.description_edit = QLineEdit()
+        self.description_edit.setPlaceholderText("Task description")
+        layout.addWidget(QLabel("Description"), 0, 2)
+        layout.addWidget(self.description_edit, 1, 2)
+
+        self.remove_button = QPushButton("Remove")
+        self.remove_button.clicked.connect(self.handle_remove)
+        layout.addWidget(self.remove_button, 1, 3)
+
+        self.activity_combo.currentIndexChanged.connect(self.emit_change)
+        self.hours_spin.valueChanged.connect(self.emit_change)
+        self.description_edit.textChanged.connect(self.emit_change)
+
+        if entry:
+            self.set_entry(entry)
+        else:
+            self.hours_spin.setValue(1)
+
+    def set_entry(self, entry):
+        activity = entry.get("activity", "")
+        hours = int(entry.get("hours", 1))
+        description = entry.get("description", "")
+
+        activity_index = self.activity_combo.findText(activity)
+        if activity_index >= 0:
+            self.activity_combo.setCurrentIndex(activity_index)
+        self.hours_spin.setValue(max(1, min(MAX_HOURS_PER_ENTRY, hours)))
+        self.description_edit.setText(description)
+
+    def get_entry(self):
+        return {
+            "project": VALID_PROJECTS[0],
+            "activity": self.activity_combo.currentText().strip(),
+            "hours": int(self.hours_spin.value()),
+            "description": self.description_edit.text().strip(),
+        }
+
+    def emit_change(self):
+        if self.on_change:
+            self.on_change()
+
+    def handle_remove(self):
+        if self.on_remove:
+            self.on_remove(self)
+
+
+class OldDayEditorDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.setWindowTitle("Edit Old Day")
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self.setMinimumWidth(860)
+        self.loading_rows = False
+        self.rows = []
+
+        layout = QVBoxLayout(self)
+
+        help_label = QLabel(f"Edit a past day by rebalancing the rows. The day must total {MAX_HOURS_PER_DAY} hours and each row must stay at {MAX_HOURS_PER_ENTRY} hours or less.")
+        help_label.setWordWrap(True)
+        layout.addWidget(help_label)
+
+        top_row = QHBoxLayout()
+        top_row.addWidget(QLabel("Date:"))
+
+        self.date_edit = QDateEdit()
+        self.date_edit.setCalendarPopup(True)
+        self.date_edit.setDisplayFormat("yyyy-MM-dd")
+        self.date_edit.setDate(QDate.currentDate().addDays(-1))
+        self.date_edit.setMaximumDate(QDate.currentDate())
+        self.date_edit.dateChanged.connect(self.load_selected_date)
+        top_row.addWidget(self.date_edit)
+        top_row.addStretch(1)
+        layout.addLayout(top_row)
+
+        self.summary_label = QLabel("")
+        layout.addWidget(self.summary_label)
+
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll_container = QWidget()
+        self.scroll_layout = QVBoxLayout(self.scroll_container)
+        self.scroll_layout.setContentsMargins(0, 0, 0, 0)
+        self.scroll_layout.setSpacing(10)
+        self.scroll_layout.addStretch(1)
+        self.scroll.setWidget(self.scroll_container)
+        layout.addWidget(self.scroll)
+
+        button_row = QHBoxLayout()
+        self.add_row_button = QPushButton("Add Task")
+        self.add_row_button.clicked.connect(self.add_blank_row)
+        button_row.addWidget(self.add_row_button)
+        button_row.addStretch(1)
+
+        self.submit_button = QPushButton("Save Day")
+        self.submit_button.clicked.connect(self.submit_day)
+        button_row.addWidget(self.submit_button)
+
+        cancel_button = QPushButton("Cancel")
+        cancel_button.clicked.connect(self.reject)
+        button_row.addWidget(cancel_button)
+
+        layout.addLayout(button_row)
+
+        self.load_selected_date()
+
+    def current_date_str(self):
+        return self.date_edit.date().toString("yyyy-MM-dd")
+
+    def clear_rows(self):
+        while self.rows:
+            row = self.rows.pop()
+            row.setParent(None)
+            row.deleteLater()
+
+    def add_blank_row(self):
+        self.add_entry_row()
+        self.update_summary()
+
+    def add_entry_row(self, entry=None):
+        row = DayEntryRow(entry=entry, on_change=self.update_summary, on_remove=self.remove_row)
+        insert_at = self.scroll_layout.count() - 1
+        self.scroll_layout.insertWidget(insert_at, row)
+        self.rows.append(row)
+        return row
+
+    def remove_row(self, row):
+        if len(self.rows) <= 1:
+            show_box(self, QMessageBox.Warning, "Edit Old Day", "Keep at least one task row for the day.")
+            return
+
+        self.rows.remove(row)
+        row.setParent(None)
+        row.deleteLater()
+        self.update_summary()
+
+    def load_selected_date(self):
+        date_str = self.current_date_str()
+        self.loading_rows = True
+        try:
+            self.clear_rows()
+            entries = get_timesheet_entries_for_day(date_str)
+            if not entries:
+                self.add_entry_row()
+            else:
+                for entry in entries:
+                    self.add_entry_row(entry)
+        finally:
+            self.loading_rows = False
+
+        self.update_summary()
+
+    def collect_entries(self):
+        return [row.get_entry() for row in self.rows]
+
+    def is_valid(self):
+        entries = self.collect_entries()
+        if not entries:
+            return False, "Add at least one task."
+
+        total_hours = 0
+        for entry in entries:
+            if entry["activity"] not in VALID_ACTIVITIES:
+                return False, "Select a valid activity for every row."
+            if not entry["description"]:
+                return False, "Description cannot be empty."
+            if entry["hours"] < 1 or entry["hours"] > MAX_HOURS_PER_ENTRY:
+                return False, f"Each row must be between 1 and {MAX_HOURS_PER_ENTRY} hours."
+            total_hours += entry["hours"]
+
+        if total_hours != MAX_HOURS_PER_DAY:
+            return False, f"Total must equal {MAX_HOURS_PER_DAY} hours."
+
+        return True, ""
+
+    def update_summary(self):
+        if self.loading_rows:
+            return
+
+        entries = self.collect_entries()
+        total_hours = sum(entry["hours"] for entry in entries)
+        valid, message = self.is_valid()
+        self.summary_label.setText(
+            f"Total hours: {total_hours} / {MAX_HOURS_PER_DAY}"
+            + (f"  |  {message}" if not valid and message else "")
+        )
+        self.submit_button.setEnabled(valid)
+
+    def submit_day(self):
+        date_str = self.current_date_str()
+        entries = self.collect_entries()
+
+        try:
+            replace_timesheet_entries_for_day(date_str, entries)
+            for activity in dict.fromkeys(entry["activity"] for entry in entries):
+                record_recent_activity(activity)
+            show_box(self, QMessageBox.Information, "Saved", f"Updated {date_str} successfully.")
+            self.accept()
+        except Exception as exc:
+            show_box(self, QMessageBox.Critical, "Edit Old Day", str(exc))
+
+
 class TimesheetController(QWidget):
     def __init__(self, app):
         super().__init__()
@@ -258,9 +487,17 @@ class TimesheetController(QWidget):
 
         menu = QMenu()
 
-        manual_log_action = QAction("Manual Log", self)
-        manual_log_action.triggered.connect(self.show_manual_log)
-        menu.addAction(manual_log_action)
+        manual_log_menu = QMenu("Manual Log", self)
+
+        log_today_action = QAction("Log Today", self)
+        log_today_action.triggered.connect(self.show_manual_log)
+        manual_log_menu.addAction(log_today_action)
+
+        edit_old_day_action = QAction("Edit Old Day", self)
+        edit_old_day_action.triggered.connect(self.show_old_day_editor)
+        manual_log_menu.addAction(edit_old_day_action)
+
+        menu.addMenu(manual_log_menu)
 
         leave_action = QAction("Mark Today as Leave (OOF)", self)
         leave_action.triggered.connect(self.mark_today_leave)
@@ -303,6 +540,10 @@ class TimesheetController(QWidget):
             return
 
         dialog = ManualLogDialog(remaining_hours, today_str, self)
+        dialog.exec()
+
+    def show_old_day_editor(self):
+        dialog = OldDayEditorDialog(self)
         dialog.exec()
 
     def mark_today_leave(self):

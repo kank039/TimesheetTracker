@@ -55,7 +55,11 @@ Look for the Blue Square Icon in your System Tray (near the clock/Wi-Fi).
 System Tray Controls
 Right-click the tray icon to access:
 
-Manual Log: Force a log entry (great for bulk-logging 8 hours at once).
+Manual Log:
+Log Today: Force a log entry for the current day (great for bulk-logging 8 hours at once).
+Edit Old Day: Open a date-based editor for past entries so you can fix spelling mistakes or rebalance hours.
+
+Old-day edits must still total 8 hours for the selected date, and no single row can exceed 3 hours.
 
 Mark Today as Leave (OOF): Silence the tracker for sick days or PTO.
 
