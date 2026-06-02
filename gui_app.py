@@ -53,9 +53,6 @@ from core_engine import (
     setup_database,
 )
 
-from single_instance import acquire_single_instance_lock
-
-
 def setup_persistence():
     if sys.platform != "win32":
         return
@@ -639,11 +636,7 @@ class TimesheetController(QWidget):
             dialog.exec()
 
 
-def main():
-    lock = acquire_single_instance_lock()
-    if lock is None:
-        return
-
+def main(lock=None):
     setup_database()
     setup_persistence()
 

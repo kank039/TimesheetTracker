@@ -10,4 +10,4 @@ if __name__ == "__main__":
 
     from gui_app import main
 
-    main()
+    main(lock)
