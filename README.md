@@ -75,7 +75,8 @@ Bash
 pip install pandas PySide6 pyinstaller openpyxl
 
 # 2. Compile to a single .exe
-pyinstaller --noconsole --onefile --name "TimesheetTracker" main.py
+pyinstaller --noconsole --onefile --name "TimesheetTracker" --icon=app.ico --version-file=version.txt main.py
+<!-- pyinstaller --noconsole --onefile --name "TimesheetTracker" main.py -->
 📝 Changelog
 [v1.2.0] - PySide6 UI Rewrite
 Changed: Replaced Tkinter and pystray with a single PySide6 event loop.
