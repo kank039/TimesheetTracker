@@ -73,7 +73,36 @@ DB_NAME = determine_paths()
 
 # Strict HR Parameters
 VALID_PROJECTS = ["RAM - Project Transcend 2026"]
-VALID_ACTIVITIES = ["Dev-Client Interaction", "Dev-Bug Fixing", "Dev-R & D"]
+VALID_ACTIVITIES = [#["Dev-Client Interaction", "Dev-Bug Fixing", "Dev-R & D"]
+    "Dev-Bug Fixing",
+    "Dev-Change Request",
+    "Dev-Client Interaction",
+    "Dev-Client Visit",
+    "Dev-Code review",
+    "Dev-Coding and Implementation",
+    "Dev-Daily Standup Meeting",
+    "Dev-Database Design",
+    "Dev-DB Administration",
+    "Dev-Documentation",
+    "Dev-Efforts Estimation",
+    "Dev-Guiding Colleague",
+    "Dev-Investigation issue/scenario",
+    "Dev-Others",
+    "Dev-Performance Tuning",
+    "Dev-R & D",
+    "Dev-Reports Design and Devlopment",
+    "Dev-Requirement understanding/analysis",
+    "Dev-Retrospective Meeting",
+    "Dev-Scrum Meetings",
+    "Dev-Sprint Planning Meetings",
+    "Dev-Story Grooming",
+    "Dev-Support",
+    "Dev-System and Architecture Design",
+    "Dev-Team Discussion",
+    "Dev-Team Review",
+    "Dev-Technical Discussion",
+    "Dev-Training",
+    ]
 MAX_HOURS_PER_DAY = 8
 MAX_HOURS_PER_ENTRY = 3
 
