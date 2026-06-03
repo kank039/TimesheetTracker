@@ -3,7 +3,7 @@
 ; Non-commercial use only
 
 #define MyAppName "TimesheetTracker"
-#define MyAppVersion "1.0"
+#define MyAppVersion "3.0"
 #define MyAppPublisher "GHOSTS"
 #define MyAppURL "https://www.example.com/"
 #define MyAppExeName "TimesheetTracker.exe"
