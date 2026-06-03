@@ -41,6 +41,8 @@ from core_engine import (
     VALID_PROJECTS,
     add_leave,
     add_timesheet_entry,
+    get_all_leaves,
+    get_company_holidays,
     get_timesheet_entries_for_day,
     get_logged_hours_for_day,
     get_recent_activities,
@@ -49,6 +51,7 @@ from core_engine import (
     get_unlogged_hours,
     is_month_end_freeze,
     record_recent_activity,
+    remove_leave,
     replace_timesheet_entries_for_day,
     setup_database,
 )
@@ -520,11 +523,411 @@ class OldDayEditorDialog(QDialog):
             show_box(self, QMessageBox.Critical, "Edit Old Day", str(exc))
 
 
+class HolidayManagerWindow(QWidget):
+    """Main GUI window opened on tray left-click: shows company holidays & personal leaves."""
+
+    STYLE = """
+        HolidayManagerWindow {
+            background: #1e1e2e;
+        }
+        QLabel#windowTitle {
+            color: #cdd6f4;
+            font-size: 20px;
+            font-weight: 700;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        QLabel#sectionTitle {
+            color: #89b4fa;
+            font-size: 14px;
+            font-weight: 600;
+            font-family: 'Segoe UI', sans-serif;
+            padding: 4px 0;
+        }
+        QLabel#subtitle {
+            color: #6c7086;
+            font-size: 11px;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        QFrame#card {
+            background: #313244;
+            border: 1px solid #45475a;
+            border-radius: 10px;
+            padding: 14px;
+        }
+        QLabel#holidayDate {
+            color: #a6adc8;
+            font-size: 12px;
+            font-family: 'Segoe UI', monospace;
+            min-width: 90px;
+        }
+        QLabel#holidayName {
+            color: #cdd6f4;
+            font-size: 12px;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        QLabel#holidayPast {
+            color: #585b70;
+            font-size: 12px;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        QLabel#holidayDatePast {
+            color: #585b70;
+            font-size: 12px;
+            font-family: 'Segoe UI', monospace;
+            min-width: 90px;
+        }
+        QLabel#holidayUpcoming {
+            color: #a6e3a1;
+            font-size: 12px;
+            font-weight: 600;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        QLabel#holidayDateUpcoming {
+            color: #a6e3a1;
+            font-size: 12px;
+            font-weight: 600;
+            font-family: 'Segoe UI', monospace;
+            min-width: 90px;
+        }
+        QLabel#badge {
+            background: #89b4fa;
+            color: #1e1e2e;
+            font-size: 10px;
+            font-weight: 700;
+            border-radius: 4px;
+            padding: 2px 6px;
+        }
+        QLabel#badgePast {
+            background: #45475a;
+            color: #6c7086;
+            font-size: 10px;
+            font-weight: 700;
+            border-radius: 4px;
+            padding: 2px 6px;
+        }
+        QLabel#leaveDate {
+            color: #cdd6f4;
+            font-size: 12px;
+            font-family: 'Segoe UI', monospace;
+            min-width: 90px;
+        }
+        QLabel#leaveName {
+            color: #cdd6f4;
+            font-size: 12px;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        QPushButton#removeBtn {
+            background: transparent;
+            color: #f38ba8;
+            border: 1px solid #f38ba8;
+            border-radius: 4px;
+            font-size: 11px;
+            padding: 2px 10px;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        QPushButton#removeBtn:hover {
+            background: #f38ba8;
+            color: #1e1e2e;
+        }
+        QPushButton#addBtn {
+            background: #89b4fa;
+            color: #1e1e2e;
+            border: none;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            padding: 6px 18px;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        QPushButton#addBtn:hover {
+            background: #b4d0fb;
+        }
+        QDateEdit {
+            background: #45475a;
+            color: #cdd6f4;
+            border: 1px solid #585b70;
+            border-radius: 6px;
+            padding: 4px 8px;
+            font-size: 12px;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        QLineEdit#leaveReasonEdit {
+            background: #45475a;
+            color: #cdd6f4;
+            border: 1px solid #585b70;
+            border-radius: 6px;
+            padding: 4px 8px;
+            font-size: 12px;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        QScrollArea {
+            border: none;
+            background: transparent;
+        }
+        QScrollBar:vertical {
+            background: #313244;
+            width: 8px;
+            border-radius: 4px;
+        }
+        QScrollBar::handle:vertical {
+            background: #585b70;
+            border-radius: 4px;
+            min-height: 30px;
+        }
+        QScrollBar::handle:vertical:hover {
+            background: #6c7086;
+        }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+            height: 0px;
+        }
+        QLabel#emptyState {
+            color: #6c7086;
+            font-size: 12px;
+            font-style: italic;
+            font-family: 'Segoe UI', sans-serif;
+            padding: 20px;
+        }
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Timesheet Tracker — Holidays & Leaves")
+        self.setMinimumSize(780, 520)
+        self.resize(820, 560)
+        self.setStyleSheet(self.STYLE)
+        self.setWindowIcon(create_app_icon())
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 16, 20, 16)
+        root.setSpacing(12)
+
+        # Title bar
+        title = QLabel("📅  Holidays & Leaves")
+        title.setObjectName("windowTitle")
+        root.addWidget(title)
+
+        sub = QLabel("Company holidays are fixed. You can add personal leaves to skip logging on those days.")
+        sub.setObjectName("subtitle")
+        sub.setWordWrap(True)
+        root.addWidget(sub)
+
+        # Two-panel horizontal layout
+        panels = QHBoxLayout()
+        panels.setSpacing(14)
+
+        # ── Left panel: Company Holidays ──
+        left_card = QFrame()
+        left_card.setObjectName("card")
+        left_layout = QVBoxLayout(left_card)
+        left_layout.setSpacing(6)
+
+        section_title = QLabel("🏢  Company Holidays (2026)")
+        section_title.setObjectName("sectionTitle")
+        left_layout.addWidget(section_title)
+
+        left_scroll = QScrollArea()
+        left_scroll.setWidgetResizable(True)
+        self.company_scroll_content = QWidget()
+        self.company_scroll_layout = QVBoxLayout(self.company_scroll_content)
+        self.company_scroll_layout.setContentsMargins(0, 0, 0, 0)
+        self.company_scroll_layout.setSpacing(4)
+        left_scroll.setWidget(self.company_scroll_content)
+        left_layout.addWidget(left_scroll)
+
+        panels.addWidget(left_card, stretch=1)
+
+        # ── Right panel: Personal Leaves ──
+        right_card = QFrame()
+        right_card.setObjectName("card")
+        right_layout = QVBoxLayout(right_card)
+        right_layout.setSpacing(8)
+
+        section_title2 = QLabel("🧘  My Personal Leaves")
+        section_title2.setObjectName("sectionTitle")
+        right_layout.addWidget(section_title2)
+
+        # Add-leave form
+        form_row = QHBoxLayout()
+        form_row.setSpacing(8)
+
+        self.date_edit = QDateEdit()
+        self.date_edit.setCalendarPopup(True)
+        self.date_edit.setDisplayFormat("yyyy-MM-dd")
+        self.date_edit.setDate(QDate.currentDate())
+        form_row.addWidget(self.date_edit)
+
+        self.reason_edit = QLineEdit()
+        self.reason_edit.setObjectName("leaveReasonEdit")
+        self.reason_edit.setPlaceholderText("Reason (optional)")
+        form_row.addWidget(self.reason_edit, stretch=1)
+
+        add_btn = QPushButton("+ Add Leave")
+        add_btn.setObjectName("addBtn")
+        add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        add_btn.clicked.connect(self.add_personal_leave)
+        form_row.addWidget(add_btn)
+
+        right_layout.addLayout(form_row)
+
+        # Separator line
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet("color: #45475a;")
+        right_layout.addWidget(sep)
+
+        right_scroll = QScrollArea()
+        right_scroll.setWidgetResizable(True)
+        self.personal_scroll_content = QWidget()
+        self.personal_scroll_layout = QVBoxLayout(self.personal_scroll_content)
+        self.personal_scroll_layout.setContentsMargins(0, 0, 0, 0)
+        self.personal_scroll_layout.setSpacing(4)
+        right_scroll.setWidget(self.personal_scroll_content)
+        right_layout.addWidget(right_scroll)
+
+        panels.addWidget(right_card, stretch=1)
+
+        root.addLayout(panels, stretch=1)
+
+        self.populate()
+
+    # ── Data population ──
+
+    def populate(self):
+        self._populate_company_holidays()
+        self._populate_personal_leaves()
+
+    def _clear_layout(self, layout):
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.setParent(None)
+                widget.deleteLater()
+
+    def _populate_company_holidays(self):
+        self._clear_layout(self.company_scroll_layout)
+        today = datetime.datetime.now().strftime("%Y-%m-%d")
+        holidays = get_company_holidays()
+        next_upcoming_found = False
+
+        for date_str, name in holidays:
+            row = QHBoxLayout()
+            row.setSpacing(8)
+
+            is_past = date_str < today
+            is_next = (not is_past and not next_upcoming_found)
+
+            date_label = QLabel(date_str)
+            name_label = QLabel(name)
+
+            if is_past:
+                date_label.setObjectName("holidayDatePast")
+                name_label.setObjectName("holidayPast")
+            elif is_next:
+                date_label.setObjectName("holidayDateUpcoming")
+                name_label.setObjectName("holidayUpcoming")
+                next_upcoming_found = True
+            else:
+                date_label.setObjectName("holidayDate")
+                name_label.setObjectName("holidayName")
+
+            row.addWidget(date_label)
+            row.addWidget(name_label, stretch=1)
+
+            if is_next:
+                badge = QLabel("NEXT")
+                badge.setObjectName("badge")
+                row.addWidget(badge)
+            elif is_past:
+                badge = QLabel("PAST")
+                badge.setObjectName("badgePast")
+                row.addWidget(badge)
+
+            container = QWidget()
+            container.setLayout(row)
+            self.company_scroll_layout.addWidget(container)
+
+        self.company_scroll_layout.addStretch(1)
+
+    def _populate_personal_leaves(self):
+        self._clear_layout(self.personal_scroll_layout)
+        all_leaves = get_all_leaves()
+        personal = [l for l in all_leaves if l["type"] == "Personal Leave"]
+
+        if not personal:
+            empty = QLabel("No personal leaves set yet.")
+            empty.setObjectName("emptyState")
+            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.personal_scroll_layout.addWidget(empty)
+        else:
+            for leave in personal:
+                row = QHBoxLayout()
+                row.setSpacing(8)
+
+                date_label = QLabel(leave["date"])
+                date_label.setObjectName("leaveDate")
+                row.addWidget(date_label)
+
+                reason = leave.get("name", "") or "Personal Leave"
+                name_label = QLabel(reason)
+                name_label.setObjectName("leaveName")
+                row.addWidget(name_label, stretch=1)
+
+                remove_btn = QPushButton("Remove")
+                remove_btn.setObjectName("removeBtn")
+                remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                date_val = leave["date"]
+                remove_btn.clicked.connect(lambda checked, d=date_val: self.remove_personal_leave(d))
+                row.addWidget(remove_btn)
+
+                container = QWidget()
+                container.setLayout(row)
+                self.personal_scroll_layout.addWidget(container)
+
+        self.personal_scroll_layout.addStretch(1)
+
+    # ── Actions ──
+
+    def add_personal_leave(self):
+        date_str = self.date_edit.date().toString("yyyy-MM-dd")
+        reason = self.reason_edit.text().strip()
+
+        # Check if it's a weekend
+        from core_engine import is_weekend
+        if is_weekend(date_str):
+            show_box(self, QMessageBox.Icon.Warning, "Cannot Add", "That date is a weekend — no logging happens anyway.")
+            return
+
+        # Check if it's already a company holiday
+        company_dates = [d for d, _ in get_company_holidays()]
+        if date_str in company_dates:
+            show_box(self, QMessageBox.Icon.Information, "Already a Holiday", "That date is already a company holiday.")
+            return
+
+        # Check if already added
+        existing = get_all_leaves()
+        if any(l["date"] == date_str and l["type"] == "Personal Leave" for l in existing):
+            show_box(self, QMessageBox.Icon.Information, "Already Added", "You already have a leave on that date.")
+            return
+
+        add_leave(date_str, "Personal Leave", reason or "Personal Leave")
+        self.reason_edit.clear()
+        self._populate_personal_leaves()
+
+    def remove_personal_leave(self, date_str):
+        try:
+            remove_leave(date_str)
+            self._populate_personal_leaves()
+        except ValueError as exc:
+            show_box(self, QMessageBox.Icon.Warning, "Cannot Remove", str(exc))
+
+
 class TimesheetController(QWidget):
     def __init__(self, app):
         super().__init__()
         self.app = app
         self.tray_icon = None
+        self.holiday_window = None
         self.last_tick_key = None
         self.init_tray()
         self.init_timer()
@@ -563,6 +966,7 @@ class TimesheetController(QWidget):
         menu.addAction(quit_action)
 
         self.tray_icon.setContextMenu(menu)
+        self.tray_icon.activated.connect(self.on_tray_activated)
         self.tray_icon.show()
 
     def init_timer(self):
@@ -608,7 +1012,21 @@ class TimesheetController(QWidget):
     def export_now(self):
         export_timesheet(self, prompt_for_path=True)
 
+    def show_holiday_window(self):
+        if self.holiday_window is None:
+            self.holiday_window = HolidayManagerWindow()
+        self.holiday_window.populate()
+        self.holiday_window.show()
+        self.holiday_window.raise_()
+        self.holiday_window.activateWindow()
+
+    def on_tray_activated(self, reason):
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            self.show_holiday_window()
+
     def quit_app(self):
+        if self.holiday_window:
+            self.holiday_window.close()
         self.tray_icon.hide()
         QApplication.instance().quit()
 

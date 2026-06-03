@@ -106,6 +106,24 @@ VALID_ACTIVITIES = [#["Dev-Client Interaction", "Dev-Bug Fixing", "Dev-R & D"]
 MAX_HOURS_PER_DAY = 8
 MAX_HOURS_PER_ENTRY = 3
 
+# Company-wide holidays (same for everyone)
+COMPANY_HOLIDAYS = [
+    ("2026-01-01", "New Year's Day"),
+    ("2026-01-26", "Republic Day"),
+    ("2026-03-17", "Holi"),
+    ("2026-04-02", "Ram Navami"),
+    ("2026-04-03", "Good Friday"),
+    ("2026-05-01", "May Day"),
+    ("2026-06-26", "Eid-ul-Adha (Bakrid)"),
+    ("2026-08-15", "Independence Day"),
+    ("2026-08-25", "Janmashtami"),
+    ("2026-10-02", "Gandhi Jayanti"),
+    ("2026-10-20", "Dussehra"),
+    ("2026-11-09", "Diwali"),
+    ("2026-11-10", "Diwali (Day 2)"),
+    ("2026-12-25", "Christmas"),
+]
+
 # ==========================================
 # DATABASE & LOGIC
 # ==========================================
@@ -134,9 +152,29 @@ def setup_database():
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS leaves (
             leave_date TEXT PRIMARY KEY,
-            leave_type TEXT NOT NULL
+            leave_type TEXT NOT NULL,
+            leave_name TEXT DEFAULT ''
         )
     ''')
+    # Add leave_name column if upgrading from an older schema
+    try:
+        cursor.execute("ALTER TABLE leaves ADD COLUMN leave_name TEXT DEFAULT ''")
+    except sqlite3.OperationalError:
+        pass  # column already exists
+    conn.commit()
+    conn.close()
+    seed_company_holidays()
+
+
+def seed_company_holidays():
+    """Insert company holidays into the leaves table (idempotent)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    for date_str, name in COMPANY_HOLIDAYS:
+        cursor.execute(
+            'INSERT OR IGNORE INTO leaves (leave_date, leave_type, leave_name) VALUES (?, ?, ?)',
+            (date_str, "Company Holiday", name),
+        )
     conn.commit()
     conn.close()
 
@@ -152,12 +190,54 @@ def is_leave_or_holiday(date_str):
     conn.close()
     return result is not None
 
-def add_leave(date_str, leave_type="Personal Leave"):
+def add_leave(date_str, leave_type="Personal Leave", leave_name=""):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute('INSERT OR REPLACE INTO leaves (leave_date, leave_type) VALUES (?, ?)', (date_str, leave_type))
+    cursor.execute(
+        'INSERT OR REPLACE INTO leaves (leave_date, leave_type, leave_name) VALUES (?, ?, ?)',
+        (date_str, leave_type, leave_name),
+    )
     conn.commit()
     conn.close()
+
+
+def remove_leave(date_str):
+    """Remove a personal leave. Refuses to delete company holidays."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT leave_type FROM leaves WHERE leave_date = ?", (date_str,))
+    row = cursor.fetchone()
+    if row and row[0] == "Company Holiday":
+        conn.close()
+        raise ValueError("Cannot remove a company holiday.")
+    cursor.execute("DELETE FROM leaves WHERE leave_date = ?", (date_str,))
+    conn.commit()
+    conn.close()
+
+
+def get_all_leaves(year=None):
+    """Return all leaves, optionally filtered by year."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    if year:
+        prefix = f"{year}-"
+        cursor.execute(
+            "SELECT leave_date, leave_type, leave_name FROM leaves WHERE leave_date LIKE ? ORDER BY leave_date ASC",
+            (prefix + "%",),
+        )
+    else:
+        cursor.execute("SELECT leave_date, leave_type, leave_name FROM leaves ORDER BY leave_date ASC")
+    results = [
+        {"date": row[0], "type": row[1], "name": row[2] or ""}
+        for row in cursor.fetchall()
+    ]
+    conn.close()
+    return results
+
+
+def get_company_holidays():
+    """Return the hardcoded company holidays list."""
+    return list(COMPANY_HOLIDAYS)
 
 def record_recent_activity(activity):
     if activity not in VALID_ACTIVITIES:
