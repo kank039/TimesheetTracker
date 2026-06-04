@@ -1595,6 +1595,9 @@ class TimesheetController(QWidget):
         self.init_timer()
         self.show_first_run_notice()
 
+        # Auto-insert time blocks as soon as the app starts (2s delay for init)
+        QTimer.singleShot(2000, self._startup_insert_blocks)
+
     def init_tray(self):
         self.tray_icon = QSystemTrayIcon(create_app_icon(), self.app)
         self.tray_icon.setToolTip("Timesheet Tracker")
@@ -1651,8 +1654,17 @@ class TimesheetController(QWidget):
         else:
             show_box(self, QMessageBox.Information, "First Run Setup", message + "\nDatabase is stored in your Windows AppData folder.")
 
+    def _startup_insert_blocks(self):
+        """Called once shortly after app launch to insert today's time blocks immediately."""
+        today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+        insert_time_blocks_for_day(today_str)
+
     def show_manual_log(self):
         today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+
+        # Ensure time blocks are inserted before calculating remaining hours
+        insert_time_blocks_for_day(today_str)
+
         remaining_minutes = MAX_HOURS_PER_DAY * 60 - get_logged_minutes_for_day(today_str)
         if remaining_minutes <= 0:
             show_box(self, QMessageBox.Information, "All Good!", "You have 0 hours remaining for today.")
