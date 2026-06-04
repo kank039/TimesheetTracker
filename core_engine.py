@@ -162,9 +162,34 @@ def setup_database():
             name TEXT NOT NULL UNIQUE
         )
     ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS time_blocks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            project TEXT NOT NULL,
+            activity TEXT NOT NULL,
+            hours INTEGER NOT NULL DEFAULT 0,
+            minutes INTEGER NOT NULL DEFAULT 0,
+            description TEXT NOT NULL,
+            days_of_week TEXT NOT NULL DEFAULT '0,1,2,3,4',
+            enabled INTEGER NOT NULL DEFAULT 1
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS time_block_insertions (
+            block_id INTEGER NOT NULL,
+            insert_date TEXT NOT NULL,
+            PRIMARY KEY (block_id, insert_date)
+        )
+    ''')
     # Add leave_name column if upgrading from an older schema
     try:
         cursor.execute("ALTER TABLE leaves ADD COLUMN leave_name TEXT DEFAULT ''")
+    except sqlite3.OperationalError:
+        pass  # column already exists
+    # Add days_of_week column if upgrading from an older schema
+    try:
+        cursor.execute("ALTER TABLE time_blocks ADD COLUMN days_of_week TEXT NOT NULL DEFAULT '0,1,2,3,4'")
     except sqlite3.OperationalError:
         pass  # column already exists
     conn.commit()
@@ -327,6 +352,239 @@ def get_all_leaves(year=None):
 def get_company_holidays():
     """Return the hardcoded company holidays list."""
     return list(COMPANY_HOLIDAYS)
+
+
+# ==========================================
+# TIME BLOCKS
+# ==========================================
+
+DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+
+def get_time_blocks():
+    """Return all time blocks ordered by id."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute(
+        'SELECT id, name, project, activity, hours, minutes, description, days_of_week, enabled '
+        'FROM time_blocks ORDER BY id ASC'
+    )
+    blocks = [
+        {
+            "id": row[0],
+            "name": row[1],
+            "project": row[2],
+            "activity": row[3],
+            "hours": row[4],
+            "minutes": row[5],
+            "description": row[6],
+            "days_of_week": row[7],
+            "enabled": bool(row[8]),
+        }
+        for row in cursor.fetchall()
+    ]
+    conn.close()
+    return blocks
+
+
+def add_time_block(name, project, activity, hours, minutes, description, days_of_week="0,1,2,3,4"):
+    """Add a recurring time block. Validates inputs."""
+    name = name.strip()
+    if not name:
+        raise ValueError("Block name cannot be empty.")
+    if project not in get_projects():
+        raise ValueError("Invalid project selected.")
+    if activity not in VALID_ACTIVITIES:
+        raise ValueError("Invalid activity selected.")
+    if hours < 0 or minutes < 0 or minutes > 59:
+        raise ValueError("Invalid time values.")
+    if hours == 0 and minutes == 0:
+        raise ValueError("Block must have a positive duration.")
+    total_entry_min = hours * 60 + minutes
+    if total_entry_min > MAX_HOURS_PER_ENTRY * 60:
+        raise ValueError(f"Each block can be at most {MAX_HOURS_PER_ENTRY} hours.")
+    if not description.strip():
+        raise ValueError("Description cannot be empty.")
+
+    # Validate days_of_week
+    _validate_days_of_week(days_of_week)
+
+    # Check total blocked time won't exceed daily limit
+    existing_total = get_total_blocked_minutes()
+    if existing_total + total_entry_min > MAX_HOURS_PER_DAY * 60:
+        raise ValueError(
+            f"Total blocked time would exceed {MAX_HOURS_PER_DAY}h daily limit. "
+            f"Currently {existing_total // 60}h {existing_total % 60}m blocked."
+        )
+
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute(
+        'INSERT INTO time_blocks (name, project, activity, hours, minutes, description, days_of_week, enabled) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, 1)',
+        (name, project, activity, int(hours), int(minutes), description.strip(), days_of_week),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_time_block(block_id, name, project, activity, hours, minutes, description, days_of_week):
+    """Update an existing time block."""
+    name = name.strip()
+    if not name:
+        raise ValueError("Block name cannot be empty.")
+    if project not in get_projects():
+        raise ValueError("Invalid project selected.")
+    if activity not in VALID_ACTIVITIES:
+        raise ValueError("Invalid activity selected.")
+    if hours < 0 or minutes < 0 or minutes > 59:
+        raise ValueError("Invalid time values.")
+    if hours == 0 and minutes == 0:
+        raise ValueError("Block must have a positive duration.")
+    total_entry_min = hours * 60 + minutes
+    if total_entry_min > MAX_HOURS_PER_ENTRY * 60:
+        raise ValueError(f"Each block can be at most {MAX_HOURS_PER_ENTRY} hours.")
+    if not description.strip():
+        raise ValueError("Description cannot be empty.")
+
+    _validate_days_of_week(days_of_week)
+
+    # Check total blocked time (excluding this block)
+    existing_total = get_total_blocked_minutes(exclude_block_id=block_id)
+    if existing_total + total_entry_min > MAX_HOURS_PER_DAY * 60:
+        raise ValueError(
+            f"Total blocked time would exceed {MAX_HOURS_PER_DAY}h daily limit."
+        )
+
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute(
+        'UPDATE time_blocks SET name=?, project=?, activity=?, hours=?, minutes=?, '
+        'description=?, days_of_week=? WHERE id=?',
+        (name, project, activity, int(hours), int(minutes), description.strip(), days_of_week, block_id),
+    )
+    if cursor.rowcount == 0:
+        conn.close()
+        raise ValueError(f"Time block with id {block_id} not found.")
+    conn.commit()
+    conn.close()
+
+
+def delete_time_block(block_id):
+    """Delete a time block and its insertion records."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM time_block_insertions WHERE block_id = ?', (block_id,))
+    cursor.execute('DELETE FROM time_blocks WHERE id = ?', (block_id,))
+    if cursor.rowcount == 0:
+        conn.close()
+        raise ValueError(f"Time block with id {block_id} not found.")
+    conn.commit()
+    conn.close()
+
+
+def toggle_time_block(block_id, enabled):
+    """Enable or disable a time block."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute(
+        'UPDATE time_blocks SET enabled = ? WHERE id = ?',
+        (1 if enabled else 0, block_id),
+    )
+    if cursor.rowcount == 0:
+        conn.close()
+        raise ValueError(f"Time block with id {block_id} not found.")
+    conn.commit()
+    conn.close()
+
+
+def get_total_blocked_minutes(exclude_block_id=None):
+    """Sum of all enabled time block durations in minutes."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    if exclude_block_id is not None:
+        cursor.execute(
+            'SELECT SUM(hours * 60 + minutes) FROM time_blocks WHERE enabled = 1 AND id != ?',
+            (exclude_block_id,),
+        )
+    else:
+        cursor.execute('SELECT SUM(hours * 60 + minutes) FROM time_blocks WHERE enabled = 1')
+    result = cursor.fetchone()[0]
+    conn.close()
+    return int(result) if result else 0
+
+
+def insert_time_blocks_for_day(date_str):
+    """Auto-insert enabled time blocks as real timesheet entries for the given day.
+
+    Skips weekends, leaves/holidays, and blocks already inserted for this date.
+    Also skips blocks whose days_of_week don't include this day.
+    Returns the number of entries inserted.
+    """
+    if is_weekend(date_str) or is_leave_or_holiday(date_str):
+        return 0
+
+    date_obj = datetime.datetime.strptime(date_str, "%Y-%m-%d")
+    weekday = date_obj.weekday()  # 0=Mon, 6=Sun
+
+    blocks = get_time_blocks()
+    inserted = 0
+
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    for block in blocks:
+        if not block["enabled"]:
+            continue
+
+        # Check if this block applies to today's weekday
+        block_days = [int(d.strip()) for d in block["days_of_week"].split(",") if d.strip()]
+        if weekday not in block_days:
+            continue
+
+        # Check if already inserted for this date
+        cursor.execute(
+            'SELECT 1 FROM time_block_insertions WHERE block_id = ? AND insert_date = ?',
+            (block["id"], date_str),
+        )
+        if cursor.fetchone():
+            continue
+
+        # Check remaining capacity
+        total_today_minutes = get_logged_minutes_for_day(date_str)
+        block_minutes = block["hours"] * 60 + block["minutes"]
+        if total_today_minutes + block_minutes > MAX_HOURS_PER_DAY * 60:
+            continue  # silently skip if would exceed daily limit
+
+        # Insert the timesheet entry
+        cursor.execute(
+            '''
+            INSERT INTO timesheet (project, activity, log_date, hours, minutes, tag, description)
+            VALUES (?, ?, ?, ?, ?, '[auto]', ?)
+            ''',
+            (block["project"], block["activity"], date_str, block["hours"], block["minutes"], block["description"]),
+        )
+        # Record the insertion
+        cursor.execute(
+            'INSERT INTO time_block_insertions (block_id, insert_date) VALUES (?, ?)',
+            (block["id"], date_str),
+        )
+        inserted += 1
+
+    conn.commit()
+    conn.close()
+    return inserted
+
+
+def _validate_days_of_week(days_of_week):
+    """Validate a comma-separated days_of_week string (0=Mon .. 6=Sun)."""
+    if not days_of_week or not days_of_week.strip():
+        raise ValueError("At least one day must be selected.")
+    parts = [d.strip() for d in days_of_week.split(",")]
+    for d in parts:
+        if not d.isdigit() or int(d) < 0 or int(d) > 6:
+            raise ValueError(f"Invalid day value: {d}. Must be 0-6.")
+
 
 def record_recent_activity(activity):
     if activity not in VALID_ACTIVITIES:

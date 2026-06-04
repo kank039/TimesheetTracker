@@ -11,6 +11,7 @@ from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QDateEdit,
+    QCheckBox,
     QComboBox,
     QDialog,
     QFormLayout,
@@ -34,28 +35,35 @@ from PySide6.QtWidgets import (
 from core_engine import (
     DB_NAME,
     CURRENT_MODE,
+    DAY_NAMES,
     IS_FIRST_RUN,
     MAX_HOURS_PER_DAY,
     MAX_HOURS_PER_ENTRY,
     VALID_ACTIVITIES,
     add_leave,
     add_project,
+    add_time_block,
     add_timesheet_entry,
     delete_project,
+    delete_time_block,
     get_all_leaves,
     get_company_holidays,
     get_projects,
+    get_time_blocks,
     get_timesheet_entries_for_day,
+    get_total_blocked_minutes,
     get_logged_hours_for_day,
     get_recent_activities,
     get_remaining_hours_for_day,
     get_logged_minutes_for_day,
     get_unlogged_hours,
+    insert_time_blocks_for_day,
     is_month_end_freeze,
     record_recent_activity,
     remove_leave,
     replace_timesheet_entries_for_day,
     setup_database,
+    toggle_time_block,
     update_project,
 )
 
@@ -552,7 +560,7 @@ class OldDayEditorDialog(QDialog):
 
 
 class HolidayManagerWindow(QWidget):
-    """Main GUI window opened on tray left-click: shows company holidays & personal leaves."""
+    """Main GUI window opened on tray left-click: shows company holidays, personal leaves & time blocks."""
 
     STYLE = """
         HolidayManagerWindow {
@@ -715,13 +723,124 @@ class HolidayManagerWindow(QWidget):
             font-family: 'Segoe UI', sans-serif;
             padding: 20px;
         }
+        /* ── Time Blocks panel styles ── */
+        QLineEdit#blockInput {
+            background: #45475a;
+            color: #cdd6f4;
+            border: 1px solid #585b70;
+            border-radius: 6px;
+            padding: 4px 8px;
+            font-size: 12px;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        QComboBox#blockCombo {
+            background: #45475a;
+            color: #cdd6f4;
+            border: 1px solid #585b70;
+            border-radius: 6px;
+            padding: 4px 8px;
+            font-size: 11px;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        QSpinBox#blockSpin {
+            background: #45475a;
+            color: #cdd6f4;
+            border: 1px solid #585b70;
+            border-radius: 6px;
+            padding: 4px 6px;
+            font-size: 12px;
+            font-family: 'Segoe UI', sans-serif;
+            max-width: 60px;
+        }
+        QLabel#blockName {
+            color: #cdd6f4;
+            font-size: 12px;
+            font-weight: 600;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        QLabel#blockDetail {
+            color: #a6adc8;
+            font-size: 11px;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        QLabel#blockDuration {
+            color: #f9e2af;
+            font-size: 11px;
+            font-weight: 600;
+            font-family: 'Segoe UI', monospace;
+        }
+        QLabel#blockDays {
+            color: #89b4fa;
+            font-size: 10px;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        QLabel#blockDisabled {
+            color: #585b70;
+            font-size: 12px;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        QPushButton#toggleBtn {
+            background: transparent;
+            color: #a6e3a1;
+            border: 1px solid #a6e3a1;
+            border-radius: 4px;
+            font-size: 10px;
+            padding: 2px 8px;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        QPushButton#toggleBtn:hover {
+            background: #a6e3a1;
+            color: #1e1e2e;
+        }
+        QPushButton#toggleBtnOff {
+            background: transparent;
+            color: #585b70;
+            border: 1px solid #585b70;
+            border-radius: 4px;
+            font-size: 10px;
+            padding: 2px 8px;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        QPushButton#toggleBtnOff:hover {
+            background: #585b70;
+            color: #cdd6f4;
+        }
+        QLabel#blockTotal {
+            color: #f9e2af;
+            font-size: 12px;
+            font-weight: 600;
+            font-family: 'Segoe UI', sans-serif;
+            padding: 6px 0;
+        }
+        QCheckBox#dayCheck {
+            color: #a6adc8;
+            font-size: 10px;
+            font-family: 'Segoe UI', sans-serif;
+            spacing: 3px;
+        }
+        QCheckBox#dayCheck::indicator {
+            width: 14px;
+            height: 14px;
+            border: 1px solid #585b70;
+            border-radius: 3px;
+            background: #45475a;
+        }
+        QCheckBox#dayCheck::indicator:checked {
+            background: #89b4fa;
+            border-color: #89b4fa;
+        }
+        QLabel#formLabel {
+            color: #a6adc8;
+            font-size: 10px;
+            font-family: 'Segoe UI', sans-serif;
+        }
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Timesheet Tracker — Holidays & Leaves")
-        self.setMinimumSize(780, 520)
-        self.resize(820, 560)
+        self.setWindowTitle("Timesheet Tracker — Holidays, Leaves & Time Blocks")
+        self.setMinimumSize(1150, 560)
+        self.resize(1200, 600)
         self.setStyleSheet(self.STYLE)
         self.setWindowIcon(create_app_icon())
 
@@ -730,16 +849,16 @@ class HolidayManagerWindow(QWidget):
         root.setSpacing(12)
 
         # Title bar
-        title = QLabel("📅  Holidays & Leaves")
+        title = QLabel("📅  Holidays, Leaves & Time Blocks")
         title.setObjectName("windowTitle")
         root.addWidget(title)
 
-        sub = QLabel("Company holidays are fixed. You can add personal leaves to skip logging on those days.")
+        sub = QLabel("Company holidays are fixed. Add personal leaves or recurring time blocks to auto-fill your daily timesheet.")
         sub.setObjectName("subtitle")
         sub.setWordWrap(True)
         root.addWidget(sub)
 
-        # Two-panel horizontal layout
+        # Three-panel horizontal layout
         panels = QHBoxLayout()
         panels.setSpacing(14)
 
@@ -764,15 +883,15 @@ class HolidayManagerWindow(QWidget):
 
         panels.addWidget(left_card, stretch=1)
 
-        # ── Right panel: Personal Leaves ──
-        right_card = QFrame()
-        right_card.setObjectName("card")
-        right_layout = QVBoxLayout(right_card)
-        right_layout.setSpacing(8)
+        # ── Center panel: Personal Leaves ──
+        center_card = QFrame()
+        center_card.setObjectName("card")
+        center_layout = QVBoxLayout(center_card)
+        center_layout.setSpacing(8)
 
         section_title2 = QLabel("🧘  My Personal Leaves")
         section_title2.setObjectName("sectionTitle")
-        right_layout.addWidget(section_title2)
+        center_layout.addWidget(section_title2)
 
         # Add-leave form
         form_row = QHBoxLayout()
@@ -795,22 +914,146 @@ class HolidayManagerWindow(QWidget):
         add_btn.clicked.connect(self.add_personal_leave)
         form_row.addWidget(add_btn)
 
-        right_layout.addLayout(form_row)
+        center_layout.addLayout(form_row)
 
         # Separator line
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
         sep.setStyleSheet("color: #45475a;")
-        right_layout.addWidget(sep)
+        center_layout.addWidget(sep)
 
-        right_scroll = QScrollArea()
-        right_scroll.setWidgetResizable(True)
+        center_scroll = QScrollArea()
+        center_scroll.setWidgetResizable(True)
         self.personal_scroll_content = QWidget()
         self.personal_scroll_layout = QVBoxLayout(self.personal_scroll_content)
         self.personal_scroll_layout.setContentsMargins(0, 0, 0, 0)
         self.personal_scroll_layout.setSpacing(4)
-        right_scroll.setWidget(self.personal_scroll_content)
-        right_layout.addWidget(right_scroll)
+        center_scroll.setWidget(self.personal_scroll_content)
+        center_layout.addWidget(center_scroll)
+
+        panels.addWidget(center_card, stretch=1)
+
+        # ── Right panel: Time Blocks ──
+        right_card = QFrame()
+        right_card.setObjectName("card")
+        right_layout = QVBoxLayout(right_card)
+        right_layout.setSpacing(6)
+
+        section_title3 = QLabel("⏱  Time Blocks")
+        section_title3.setObjectName("sectionTitle")
+        right_layout.addWidget(section_title3)
+
+        # -- Add block form --
+        block_form = QVBoxLayout()
+        block_form.setSpacing(4)
+
+        # Row 1: Name
+        name_row = QHBoxLayout()
+        name_row.setSpacing(6)
+        name_lbl = QLabel("Name")
+        name_lbl.setObjectName("formLabel")
+        name_row.addWidget(name_lbl)
+        self.block_name_edit = QLineEdit()
+        self.block_name_edit.setObjectName("blockInput")
+        self.block_name_edit.setPlaceholderText("e.g. Daily SCRUM")
+        name_row.addWidget(self.block_name_edit, stretch=1)
+        block_form.addLayout(name_row)
+
+        # Row 2: Project + Activity
+        proj_act_row = QHBoxLayout()
+        proj_act_row.setSpacing(6)
+
+        proj_lbl = QLabel("Project")
+        proj_lbl.setObjectName("formLabel")
+        proj_act_row.addWidget(proj_lbl)
+        self.block_project_combo = QComboBox()
+        self.block_project_combo.setObjectName("blockCombo")
+        self.block_project_combo.addItems(get_projects())
+        proj_act_row.addWidget(self.block_project_combo, stretch=1)
+
+        act_lbl = QLabel("Activity")
+        act_lbl.setObjectName("formLabel")
+        proj_act_row.addWidget(act_lbl)
+        self.block_activity_combo = QComboBox()
+        self.block_activity_combo.setObjectName("blockCombo")
+        self.block_activity_combo.addItems(VALID_ACTIVITIES)
+        proj_act_row.addWidget(self.block_activity_combo, stretch=1)
+
+        block_form.addLayout(proj_act_row)
+
+        # Row 3: Hours + Minutes + Description
+        time_desc_row = QHBoxLayout()
+        time_desc_row.setSpacing(6)
+
+        hr_lbl = QLabel("Hr")
+        hr_lbl.setObjectName("formLabel")
+        time_desc_row.addWidget(hr_lbl)
+        self.block_hours_spin = QSpinBox()
+        self.block_hours_spin.setObjectName("blockSpin")
+        self.block_hours_spin.setRange(0, MAX_HOURS_PER_ENTRY)
+        self.block_hours_spin.setValue(0)
+        time_desc_row.addWidget(self.block_hours_spin)
+
+        min_lbl = QLabel("Min")
+        min_lbl.setObjectName("formLabel")
+        time_desc_row.addWidget(min_lbl)
+        self.block_minutes_spin = QSpinBox()
+        self.block_minutes_spin.setObjectName("blockSpin")
+        self.block_minutes_spin.setRange(0, 59)
+        self.block_minutes_spin.setValue(30)
+        time_desc_row.addWidget(self.block_minutes_spin)
+
+        self.block_desc_edit = QLineEdit()
+        self.block_desc_edit.setObjectName("blockInput")
+        self.block_desc_edit.setPlaceholderText("Description")
+        time_desc_row.addWidget(self.block_desc_edit, stretch=1)
+
+        block_form.addLayout(time_desc_row)
+
+        # Row 4: Day-of-week checkboxes + Add button
+        days_btn_row = QHBoxLayout()
+        days_btn_row.setSpacing(4)
+
+        self.day_checkboxes = []
+        for i, day_name in enumerate(DAY_NAMES[:5]):  # Mon-Fri
+            cb = QCheckBox(day_name)
+            cb.setObjectName("dayCheck")
+            cb.setChecked(True)
+            self.day_checkboxes.append((i, cb))
+            days_btn_row.addWidget(cb)
+
+        days_btn_row.addStretch(1)
+
+        add_block_btn = QPushButton("+ Add Block")
+        add_block_btn.setObjectName("addBtn")
+        add_block_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        add_block_btn.clicked.connect(self.add_time_block)
+        days_btn_row.addWidget(add_block_btn)
+
+        block_form.addLayout(days_btn_row)
+
+        right_layout.addLayout(block_form)
+
+        # Separator
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.Shape.HLine)
+        sep2.setStyleSheet("color: #45475a;")
+        right_layout.addWidget(sep2)
+
+        # Block list scroll
+        block_scroll = QScrollArea()
+        block_scroll.setWidgetResizable(True)
+        self.block_scroll_content = QWidget()
+        self.block_scroll_layout = QVBoxLayout(self.block_scroll_content)
+        self.block_scroll_layout.setContentsMargins(0, 0, 0, 0)
+        self.block_scroll_layout.setSpacing(6)
+        block_scroll.setWidget(self.block_scroll_content)
+        right_layout.addWidget(block_scroll)
+
+        # Total footer
+        self.block_total_label = QLabel("")
+        self.block_total_label.setObjectName("blockTotal")
+        right_layout.addWidget(self.block_total_label)
 
         panels.addWidget(right_card, stretch=1)
 
@@ -823,6 +1066,7 @@ class HolidayManagerWindow(QWidget):
     def populate(self):
         self._populate_company_holidays()
         self._populate_personal_leaves()
+        self._populate_time_blocks()
 
     def _clear_layout(self, layout):
         while layout.count():
@@ -914,6 +1158,97 @@ class HolidayManagerWindow(QWidget):
 
         self.personal_scroll_layout.addStretch(1)
 
+    def _populate_time_blocks(self):
+        self._clear_layout(self.block_scroll_layout)
+        blocks = get_time_blocks()
+
+        if not blocks:
+            empty = QLabel("No time blocks defined yet.")
+            empty.setObjectName("emptyState")
+            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.block_scroll_layout.addWidget(empty)
+        else:
+            for block in blocks:
+                block_widget = QFrame()
+                block_widget.setStyleSheet(
+                    "QFrame { background: #1e1e2e; border: 1px solid #45475a; border-radius: 6px; padding: 6px; }"
+                    if block["enabled"]
+                    else "QFrame { background: #1e1e2e; border: 1px solid #313244; border-radius: 6px; padding: 6px; }"
+                )
+                block_inner = QVBoxLayout(block_widget)
+                block_inner.setContentsMargins(8, 4, 8, 4)
+                block_inner.setSpacing(2)
+
+                # Top row: name + duration
+                top_row = QHBoxLayout()
+                top_row.setSpacing(6)
+
+                name_label = QLabel(block["name"])
+                name_label.setObjectName("blockName" if block["enabled"] else "blockDisabled")
+                top_row.addWidget(name_label)
+
+                top_row.addStretch(1)
+
+                duration_h = block["hours"]
+                duration_m = block["minutes"]
+                dur_text = f"{duration_h}h {duration_m}m" if duration_m else f"{duration_h}h"
+                dur_label = QLabel(dur_text)
+                dur_label.setObjectName("blockDuration" if block["enabled"] else "blockDisabled")
+                top_row.addWidget(dur_label)
+
+                block_inner.addLayout(top_row)
+
+                # Middle row: activity + days
+                mid_row = QHBoxLayout()
+                mid_row.setSpacing(6)
+
+                act_label = QLabel(block["activity"])
+                act_label.setObjectName("blockDetail" if block["enabled"] else "blockDisabled")
+                mid_row.addWidget(act_label)
+
+                mid_row.addStretch(1)
+
+                # Format days of week
+                day_indices = [int(d.strip()) for d in block["days_of_week"].split(",") if d.strip()]
+                day_labels = [DAY_NAMES[d] for d in day_indices if d < len(DAY_NAMES)]
+                days_text = ", ".join(day_labels) if day_labels else "No days"
+                days_label = QLabel(days_text)
+                days_label.setObjectName("blockDays" if block["enabled"] else "blockDisabled")
+                mid_row.addWidget(days_label)
+
+                block_inner.addLayout(mid_row)
+
+                # Bottom row: toggle + remove
+                btn_row = QHBoxLayout()
+                btn_row.setSpacing(6)
+                btn_row.addStretch(1)
+
+                toggle_btn = QPushButton("Enabled" if block["enabled"] else "Disabled")
+                toggle_btn.setObjectName("toggleBtn" if block["enabled"] else "toggleBtnOff")
+                toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                bid = block["id"]
+                is_on = block["enabled"]
+                toggle_btn.clicked.connect(lambda checked, b=bid, e=is_on: self.toggle_block(b, e))
+                btn_row.addWidget(toggle_btn)
+
+                remove_btn = QPushButton("Remove")
+                remove_btn.setObjectName("removeBtn")
+                remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                remove_btn.clicked.connect(lambda checked, b=bid: self.remove_block(b))
+                btn_row.addWidget(remove_btn)
+
+                block_inner.addLayout(btn_row)
+
+                self.block_scroll_layout.addWidget(block_widget)
+
+        self.block_scroll_layout.addStretch(1)
+
+        # Update total
+        total_min = get_total_blocked_minutes()
+        t_h = total_min // 60
+        t_m = total_min % 60
+        self.block_total_label.setText(f"Total: {t_h}h {t_m}m / {MAX_HOURS_PER_DAY}h reserved daily")
+
     # ── Actions ──
 
     def add_personal_leave(self):
@@ -946,6 +1281,50 @@ class HolidayManagerWindow(QWidget):
         try:
             remove_leave(date_str)
             self._populate_personal_leaves()
+        except ValueError as exc:
+            show_box(self, QMessageBox.Icon.Warning, "Cannot Remove", str(exc))
+
+    def add_time_block(self):
+        name = self.block_name_edit.text().strip()
+        project = self.block_project_combo.currentText().strip()
+        activity = self.block_activity_combo.currentText().strip()
+        hours = self.block_hours_spin.value()
+        minutes = self.block_minutes_spin.value()
+        description = self.block_desc_edit.text().strip()
+
+        # Collect selected days
+        selected_days = [str(idx) for idx, cb in self.day_checkboxes if cb.isChecked()]
+        if not selected_days:
+            show_box(self, QMessageBox.Icon.Warning, "Cannot Add", "Select at least one day of the week.")
+            return
+        days_of_week = ",".join(selected_days)
+
+        try:
+            add_time_block(name, project, activity, hours, minutes, description, days_of_week)
+            # Clear form
+            self.block_name_edit.clear()
+            self.block_hours_spin.setValue(0)
+            self.block_minutes_spin.setValue(30)
+            self.block_desc_edit.clear()
+            for _, cb in self.day_checkboxes:
+                cb.setChecked(True)
+            self._populate_time_blocks()
+        except ValueError as exc:
+            show_box(self, QMessageBox.Icon.Warning, "Cannot Add Block", str(exc))
+
+    def toggle_block(self, block_id, currently_enabled):
+        try:
+            toggle_time_block(block_id, not currently_enabled)
+            self._populate_time_blocks()
+        except ValueError as exc:
+            show_box(self, QMessageBox.Icon.Warning, "Toggle Failed", str(exc))
+
+    def remove_block(self, block_id):
+        if not ask_yes_no(self, "Remove Time Block", "Remove this time block?\n\nThis cannot be undone."):
+            return
+        try:
+            delete_time_block(block_id)
+            self._populate_time_blocks()
         except ValueError as exc:
             show_box(self, QMessageBox.Icon.Warning, "Cannot Remove", str(exc))
 
@@ -1338,6 +1717,9 @@ class TimesheetController(QWidget):
             elif now.hour == 18:
                 export_timesheet(self, prompt_for_path=False)
                 return
+
+        # Auto-insert time blocks for today (idempotent — skips if already inserted)
+        insert_time_blocks_for_day(today_str)
 
         unlogged_hours = get_unlogged_hours(today_str)
         if unlogged_hours > 0:
