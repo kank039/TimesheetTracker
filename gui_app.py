@@ -38,11 +38,13 @@ from core_engine import (
     MAX_HOURS_PER_DAY,
     MAX_HOURS_PER_ENTRY,
     VALID_ACTIVITIES,
-    VALID_PROJECTS,
     add_leave,
+    add_project,
     add_timesheet_entry,
+    delete_project,
     get_all_leaves,
     get_company_holidays,
+    get_projects,
     get_timesheet_entries_for_day,
     get_logged_hours_for_day,
     get_recent_activities,
@@ -54,6 +56,7 @@ from core_engine import (
     remove_leave,
     replace_timesheet_entries_for_day,
     setup_database,
+    update_project,
 )
 
 def setup_persistence():
@@ -188,6 +191,14 @@ class ManualLogDialog(QDialog):
 
         form = QFormLayout()
 
+        self.project_combo = QComboBox()
+        projects = get_projects()
+        self.project_combo.addItems(projects)
+        if len(projects) == 1:
+            self.project_combo.setCurrentIndex(0)
+            self.project_combo.setEnabled(False)
+        form.addRow("Project:", self.project_combo)
+
         self.activity_combo = QComboBox()
         self.populate_activity_combo()
         form.addRow("Activity:", self.activity_combo)
@@ -268,7 +279,7 @@ class ManualLogDialog(QDialog):
                 chunk = min(MAX_HOURS_PER_ENTRY * 60, minutes_left)
                 chunk_hours = chunk // 60
                 chunk_minutes = chunk % 60
-                add_timesheet_entry(VALID_PROJECTS[0], activity, self.today_str, chunk_hours, chunk_minutes, description)
+                add_timesheet_entry(self.project_combo.currentText().strip(), activity, self.today_str, chunk_hours, chunk_minutes, description)
                 minutes_left -= chunk
 
             record_recent_activity(activity)
@@ -295,30 +306,40 @@ class DayEntryRow(QWidget):
         layout.setHorizontalSpacing(8)
         layout.setVerticalSpacing(6)
 
+        self.project_combo = QComboBox()
+        projects = get_projects()
+        self.project_combo.addItems(projects)
+        if len(projects) == 1:
+            self.project_combo.setCurrentIndex(0)
+            self.project_combo.setEnabled(False)
+        layout.addWidget(QLabel("Project"), 0, 0)
+        layout.addWidget(self.project_combo, 1, 0)
+
         self.activity_combo = QComboBox()
         self.activity_combo.addItems(VALID_ACTIVITIES)
-        layout.addWidget(QLabel("Activity"), 0, 0)
-        layout.addWidget(self.activity_combo, 1, 0)
+        layout.addWidget(QLabel("Activity"), 0, 1)
+        layout.addWidget(self.activity_combo, 1, 1)
 
         self.hours_spin = QSpinBox()
         self.hours_spin.setRange(0, MAX_HOURS_PER_ENTRY)
-        layout.addWidget(QLabel("Hours"), 0, 1)
-        layout.addWidget(self.hours_spin, 1, 1)
+        layout.addWidget(QLabel("Hours"), 0, 2)
+        layout.addWidget(self.hours_spin, 1, 2)
 
         self.minutes_spin = QSpinBox()
         self.minutes_spin.setRange(0, 59)
-        layout.addWidget(QLabel("Minutes"), 0, 2)
-        layout.addWidget(self.minutes_spin, 1, 2)
+        layout.addWidget(QLabel("Minutes"), 0, 3)
+        layout.addWidget(self.minutes_spin, 1, 3)
 
         self.description_edit = QLineEdit()
         self.description_edit.setPlaceholderText("Task description")
-        layout.addWidget(QLabel("Description"), 0, 3)
-        layout.addWidget(self.description_edit, 1, 3)
+        layout.addWidget(QLabel("Description"), 0, 4)
+        layout.addWidget(self.description_edit, 1, 4)
 
         self.remove_button = QPushButton("Remove")
         self.remove_button.clicked.connect(self.handle_remove)
-        layout.addWidget(self.remove_button, 1, 3)
+        layout.addWidget(self.remove_button, 1, 5)
 
+        self.project_combo.currentIndexChanged.connect(self.emit_change)
         self.activity_combo.currentIndexChanged.connect(self.emit_change)
         self.hours_spin.valueChanged.connect(self.emit_change)
         self.minutes_spin.valueChanged.connect(self.emit_change)
@@ -330,11 +351,15 @@ class DayEntryRow(QWidget):
             self.hours_spin.setValue(1)
 
     def set_entry(self, entry):
+        project = entry.get("project", "")
         activity = entry.get("activity", "")
         hours = int(entry.get("hours", 0))
         minutes = int(entry.get("minutes", 0))
         description = entry.get("description", "")
 
+        project_index = self.project_combo.findText(project)
+        if project_index >= 0:
+            self.project_combo.setCurrentIndex(project_index)
         activity_index = self.activity_combo.findText(activity)
         if activity_index >= 0:
             self.activity_combo.setCurrentIndex(activity_index)
@@ -344,7 +369,7 @@ class DayEntryRow(QWidget):
 
     def get_entry(self):
         return {
-            "project": VALID_PROJECTS[0],
+            "project": self.project_combo.currentText().strip(),
             "activity": self.activity_combo.currentText().strip(),
             "hours": int(self.hours_spin.value()),
             "minutes": int(self.minutes_spin.value()),
@@ -474,7 +499,10 @@ class OldDayEditorDialog(QDialog):
         if not entries:
             return False, "Add at least one task."
         total_minutes = 0
+        valid_projects = get_projects()
         for entry in entries:
+            if entry["project"] not in valid_projects:
+                return False, "Select a valid project for every row."
             if entry["activity"] not in VALID_ACTIVITIES:
                 return False, "Select a valid activity for every row."
             if not entry["description"]:
@@ -922,6 +950,261 @@ class HolidayManagerWindow(QWidget):
             show_box(self, QMessageBox.Icon.Warning, "Cannot Remove", str(exc))
 
 
+class ProjectManagerDialog(QDialog):
+    """Dialog to add, rename, and delete projects."""
+
+    STYLE = """
+        ProjectManagerDialog {
+            background: #1e1e2e;
+        }
+        QLabel#dialogTitle {
+            color: #cdd6f4;
+            font-size: 18px;
+            font-weight: 700;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        QLabel#subtitle {
+            color: #6c7086;
+            font-size: 11px;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        QFrame#card {
+            background: #313244;
+            border: 1px solid #45475a;
+            border-radius: 10px;
+            padding: 14px;
+        }
+        QLabel#projectName {
+            color: #cdd6f4;
+            font-size: 13px;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        QLineEdit#projectInput {
+            background: #45475a;
+            color: #cdd6f4;
+            border: 1px solid #585b70;
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-size: 13px;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        QPushButton#addBtn {
+            background: #a6e3a1;
+            color: #1e1e2e;
+            border: none;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            padding: 6px 18px;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        QPushButton#addBtn:hover {
+            background: #c6f0c4;
+        }
+        QPushButton#renameBtn {
+            background: transparent;
+            color: #89b4fa;
+            border: 1px solid #89b4fa;
+            border-radius: 4px;
+            font-size: 11px;
+            padding: 2px 10px;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        QPushButton#renameBtn:hover {
+            background: #89b4fa;
+            color: #1e1e2e;
+        }
+        QPushButton#deleteBtn {
+            background: transparent;
+            color: #f38ba8;
+            border: 1px solid #f38ba8;
+            border-radius: 4px;
+            font-size: 11px;
+            padding: 2px 10px;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        QPushButton#deleteBtn:hover {
+            background: #f38ba8;
+            color: #1e1e2e;
+        }
+        QLabel#emptyState {
+            color: #6c7086;
+            font-size: 12px;
+            font-style: italic;
+            font-family: 'Segoe UI', sans-serif;
+            padding: 20px;
+        }
+        QScrollArea {
+            border: none;
+            background: transparent;
+        }
+        QScrollBar:vertical {
+            background: #313244;
+            width: 8px;
+            border-radius: 4px;
+        }
+        QScrollBar::handle:vertical {
+            background: #585b70;
+            border-radius: 4px;
+            min-height: 30px;
+        }
+        QScrollBar::handle:vertical:hover {
+            background: #6c7086;
+        }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+            height: 0px;
+        }
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Manage Projects")
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self.setMinimumSize(520, 380)
+        self.resize(560, 420)
+        self.setStyleSheet(self.STYLE)
+        self.setWindowIcon(create_app_icon())
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(12)
+
+        title = QLabel("📁  Manage Projects")
+        title.setObjectName("dialogTitle")
+        layout.addWidget(title)
+
+        sub = QLabel("Add, rename, or remove projects. Projects with timesheet entries cannot be deleted.")
+        sub.setObjectName("subtitle")
+        sub.setWordWrap(True)
+        layout.addWidget(sub)
+
+        # Add project form
+        form_row = QHBoxLayout()
+        form_row.setSpacing(8)
+
+        self.name_edit = QLineEdit()
+        self.name_edit.setObjectName("projectInput")
+        self.name_edit.setPlaceholderText("New project name")
+        form_row.addWidget(self.name_edit, stretch=1)
+
+        add_btn = QPushButton("+ Add Project")
+        add_btn.setObjectName("addBtn")
+        add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        add_btn.clicked.connect(self.add_new_project)
+        form_row.addWidget(add_btn)
+
+        layout.addLayout(form_row)
+
+        # Separator
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet("color: #45475a;")
+        layout.addWidget(sep)
+
+        # Project list
+        card = QFrame()
+        card.setObjectName("card")
+        card_layout = QVBoxLayout(card)
+        card_layout.setSpacing(6)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        self.scroll_content = QWidget()
+        self.scroll_layout = QVBoxLayout(self.scroll_content)
+        self.scroll_layout.setContentsMargins(0, 0, 0, 0)
+        self.scroll_layout.setSpacing(6)
+        scroll.setWidget(self.scroll_content)
+        card_layout.addWidget(scroll)
+
+        layout.addWidget(card, stretch=1)
+
+        # Close button
+        close_row = QHBoxLayout()
+        close_row.addStretch(1)
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        close_row.addWidget(close_btn)
+        layout.addLayout(close_row)
+
+        self.populate()
+
+    def _clear_layout(self, layout):
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.setParent(None)
+                widget.deleteLater()
+
+    def populate(self):
+        self._clear_layout(self.scroll_layout)
+        projects = get_projects()
+
+        if not projects:
+            empty = QLabel("No projects defined. Add one above.")
+            empty.setObjectName("emptyState")
+            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.scroll_layout.addWidget(empty)
+        else:
+            for name in projects:
+                row = QHBoxLayout()
+                row.setSpacing(8)
+
+                label = QLabel(name)
+                label.setObjectName("projectName")
+                row.addWidget(label, stretch=1)
+
+                rename_btn = QPushButton("Rename")
+                rename_btn.setObjectName("renameBtn")
+                rename_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                rename_btn.clicked.connect(lambda checked, n=name: self.rename_project(n))
+                row.addWidget(rename_btn)
+
+                delete_btn = QPushButton("Delete")
+                delete_btn.setObjectName("deleteBtn")
+                delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                delete_btn.clicked.connect(lambda checked, n=name: self.remove_project(n))
+                row.addWidget(delete_btn)
+
+                container = QWidget()
+                container.setLayout(row)
+                self.scroll_layout.addWidget(container)
+
+        self.scroll_layout.addStretch(1)
+
+    def add_new_project(self):
+        name = self.name_edit.text().strip()
+        if not name:
+            show_box(self, QMessageBox.Icon.Warning, "Add Project", "Project name cannot be empty.")
+            return
+        try:
+            add_project(name)
+            self.name_edit.clear()
+            self.populate()
+        except ValueError as exc:
+            show_box(self, QMessageBox.Icon.Warning, "Add Project", str(exc))
+
+    def rename_project(self, old_name):
+        from PySide6.QtWidgets import QInputDialog
+        new_name, ok = QInputDialog.getText(self, "Rename Project", f"New name for '{old_name}':", text=old_name)
+        if not ok or not new_name.strip():
+            return
+        try:
+            update_project(old_name, new_name.strip())
+            self.populate()
+        except ValueError as exc:
+            show_box(self, QMessageBox.Icon.Warning, "Rename Project", str(exc))
+
+    def remove_project(self, name):
+        if not ask_yes_no(self, "Delete Project", f"Delete project '{name}'?\n\nThis cannot be undone."):
+            return
+        try:
+            delete_project(name)
+            self.populate()
+        except ValueError as exc:
+            show_box(self, QMessageBox.Icon.Warning, "Delete Project", str(exc))
+
+
 class TimesheetController(QWidget):
     def __init__(self, app):
         super().__init__()
@@ -954,6 +1237,10 @@ class TimesheetController(QWidget):
         leave_action = QAction("Mark Today as Leave (OOF)", self)
         leave_action.triggered.connect(self.mark_today_leave)
         menu.addAction(leave_action)
+
+        projects_action = QAction("Manage Projects", self)
+        projects_action.triggered.connect(self.show_project_manager)
+        menu.addAction(projects_action)
 
         menu.addSeparator()
 
@@ -1011,6 +1298,10 @@ class TimesheetController(QWidget):
 
     def export_now(self):
         export_timesheet(self, prompt_for_path=True)
+
+    def show_project_manager(self):
+        dialog = ProjectManagerDialog(self)
+        dialog.exec()
 
     def show_holiday_window(self):
         if self.holiday_window is None:

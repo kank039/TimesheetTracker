@@ -72,7 +72,7 @@ def determine_paths():
 DB_NAME = determine_paths()
 
 # Strict HR Parameters
-VALID_PROJECTS = ["RAM - Project Transcend 2026"]
+_DEFAULT_PROJECTS = ["RAM - Project Transcend 2026"]
 VALID_ACTIVITIES = [#["Dev-Client Interaction", "Dev-Bug Fixing", "Dev-R & D"]
     "Dev-Bug Fixing",
     "Dev-Change Request",
@@ -156,6 +156,12 @@ def setup_database():
             leave_name TEXT DEFAULT ''
         )
     ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS projects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE
+        )
+    ''')
     # Add leave_name column if upgrading from an older schema
     try:
         cursor.execute("ALTER TABLE leaves ADD COLUMN leave_name TEXT DEFAULT ''")
@@ -164,6 +170,7 @@ def setup_database():
     conn.commit()
     conn.close()
     seed_company_holidays()
+    _seed_default_projects()
 
 
 def seed_company_holidays():
@@ -175,6 +182,88 @@ def seed_company_holidays():
             'INSERT OR IGNORE INTO leaves (leave_date, leave_type, leave_name) VALUES (?, ?, ?)',
             (date_str, "Company Holiday", name),
         )
+    conn.commit()
+    conn.close()
+
+
+def _seed_default_projects():
+    """Insert the default project(s) if the projects table is empty (first run)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('SELECT COUNT(*) FROM projects')
+    if cursor.fetchone()[0] == 0:
+        for name in _DEFAULT_PROJECTS:
+            cursor.execute('INSERT OR IGNORE INTO projects (name) VALUES (?)', (name,))
+        conn.commit()
+    conn.close()
+
+
+# ==========================================
+# PROJECT MANAGEMENT
+# ==========================================
+
+def get_projects():
+    """Return all project names from the database."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('SELECT name FROM projects ORDER BY name ASC')
+    projects = [row[0] for row in cursor.fetchall()]
+    conn.close()
+    return projects
+
+
+def add_project(name):
+    """Add a new project. Raises ValueError if name is empty or already exists."""
+    name = name.strip()
+    if not name:
+        raise ValueError("Project name cannot be empty.")
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    try:
+        cursor.execute('INSERT INTO projects (name) VALUES (?)', (name,))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        raise ValueError(f"Project '{name}' already exists.")
+    finally:
+        conn.close()
+
+
+def update_project(old_name, new_name):
+    """Rename a project. Also updates all timesheet entries referencing the old name."""
+    new_name = new_name.strip()
+    if not new_name:
+        raise ValueError("Project name cannot be empty.")
+    if old_name == new_name:
+        return
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    try:
+        cursor.execute('UPDATE projects SET name = ? WHERE name = ?', (new_name, old_name))
+        if cursor.rowcount == 0:
+            raise ValueError(f"Project '{old_name}' not found.")
+        # Update historical timesheet entries
+        cursor.execute('UPDATE timesheet SET project = ? WHERE project = ?', (new_name, old_name))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        raise ValueError(f"Project '{new_name}' already exists.")
+    finally:
+        conn.close()
+
+
+def delete_project(name):
+    """Delete a project. Refuses if timesheet entries reference it."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('SELECT COUNT(*) FROM timesheet WHERE project = ?', (name,))
+    count = cursor.fetchone()[0]
+    if count > 0:
+        conn.close()
+        raise ValueError(f"Cannot delete '{name}': {count} timesheet entries reference it.")
+    cursor.execute('DELETE FROM projects WHERE name = ?', (name,))
+    if cursor.rowcount == 0:
+        conn.close()
+        raise ValueError(f"Project '{name}' not found.")
     conn.commit()
     conn.close()
 
@@ -339,7 +428,7 @@ def get_unlogged_hours(date_str, current_time=None):
 def add_timesheet_entry(project, activity, date_str, hours, minutes=0, description=""):
     if is_weekend(date_str):
         raise ValueError("Cannot log hours on a weekend.")
-    if project not in VALID_PROJECTS:
+    if project not in get_projects():
         raise ValueError("Invalid Project selected.")
     if activity not in VALID_ACTIVITIES:
         raise ValueError("Invalid Activity selected.")
@@ -387,7 +476,7 @@ def replace_timesheet_entries_for_day(date_str, entries):
         minutes = int(entry.get("minutes", 0))
         description = entry.get("description", "").strip()
 
-        if project not in VALID_PROJECTS:
+        if project not in get_projects():
             raise ValueError("Invalid Project selected.")
         if activity not in VALID_ACTIVITIES:
             raise ValueError("Invalid Activity selected.")
