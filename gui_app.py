@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QFileDialog,
+    QRadioButton,
     QScrollArea,
     QPushButton,
     QSpinBox,
