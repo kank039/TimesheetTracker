@@ -225,21 +225,18 @@ Update `export_timesheet()` to include the new column in the `SELECT` and in `df
 
 ---
 
-## 9. Manual Smoke Tests
+## 9. Automated Tests
 
-There are two standalone test scripts you can run without any test framework:
+The project uses `pytest` for automated testing. All tests are located in the `tests/` directory and use a temporary database, so they won't affect your actual timesheet data.
 
 ```bash
-# Test leave / holiday seeding and CRUD
-uv run python _test_seed.py
-
-# Test time block insertion logic
-uv run python _test_time_blocks.py
+# Run the full test suite
+uv run pytest -v
 ```
 
-Both scripts print pass/fail lines to stdout. They use the real database (whichever mode is active), so they're integration tests rather than unit tests.
+This will run tests for core logic including project management, timesheets, leaves/holidays, and recurring time blocks.
 
-> **Heads up:** These scripts do real writes. Run them against a dev copy of the database, or clean up afterwards.
+> **Heads up:** Always run tests before submitting a pull request to ensure no core logic is broken.
 
 ---
 

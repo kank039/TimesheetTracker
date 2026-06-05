@@ -108,8 +108,7 @@ TimesheetTracker/
 ├── pyproject.toml              # uv / pip project manifest with dependencies
 ├── TimesheetTracker.spec       # PyInstaller spec file for reproducible builds
 ├── TimesheetTracker_Setup.iss  # Inno Setup installer script
-├── _test_seed.py               # Manual smoke-test for leave/holiday seeding
-└── _test_time_blocks.py        # Manual smoke-test for time block insertion
+└── tests/                      # Automated pytests suite
 ```
 
 ---
