@@ -4,8 +4,8 @@ import sqlite3
 import subprocess
 import sys
 
-import pandas as pd
 import winreg
+from openpyxl import Workbook
 from PyQt6.QtCore import QDate, QTimer, Qt
 from PyQt6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
 from PyQt6.QtWidgets import (
@@ -107,7 +107,19 @@ def get_export_folder():
     return os.path.dirname(os.path.abspath(__file__))
 
 
+def get_resource_path(relative_path):
+    """Get absolute path to resource, works for dev and for PyInstaller"""
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath(os.path.dirname(__file__)), relative_path)
+
+
 def create_app_icon():
+    icon_path = get_resource_path("app.ico")
+    if os.path.exists(icon_path):
+        return QIcon(icon_path)
+    
+    # Fallback to drawn icon if app.ico is missing
     pixmap = QPixmap(64, 64)
     pixmap.fill(QColor("#0078d7"))
     painter = QPainter(pixmap)
@@ -142,17 +154,20 @@ def export_timesheet(parent=None, prompt_for_path=True):
         return None
 
     conn = sqlite3.connect(DB_NAME)
-    df = pd.read_sql_query(
-        "SELECT project, activity, log_date, hours, minutes, tag, description FROM timesheet ORDER BY log_date ASC",
-        conn,
-    )
+    cursor = conn.cursor()
+    cursor.execute("SELECT project, activity, log_date, hours, minutes, tag, description FROM timesheet ORDER BY log_date ASC")
+    rows = cursor.fetchall()
     conn.close()
 
-    if df.empty:
+    if not rows:
         show_box(parent, QMessageBox.Information, "Export", "Timesheet database is currently empty.")
         return None
 
-    df.columns = [
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Timesheet Export"
+    
+    headers = [
         "Project",
         "Activity",
         "Date(dd-MM-yyyy)",
@@ -161,7 +176,17 @@ def export_timesheet(parent=None, prompt_for_path=True):
         "Tag",
         "Description",
     ]
-    df["Date(dd-MM-yyyy)"] = pd.to_datetime(df["Date(dd-MM-yyyy)"]).dt.strftime("%d-%m-%Y")
+    ws.append(headers)
+
+    for r in rows:
+        project, activity, log_date, hours, minutes, tag, description = r
+        try:
+            date_obj = datetime.datetime.strptime(log_date, "%Y-%m-%d")
+            formatted_date = date_obj.strftime("%d-%m-%Y")
+        except ValueError:
+            formatted_date = log_date
+            
+        ws.append([project, activity, formatted_date, hours, minutes, tag, description])
 
     export_name = f"TimesheetTracker_Export_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     export_path = os.path.join(get_export_folder(), export_name)
@@ -180,7 +205,7 @@ def export_timesheet(parent=None, prompt_for_path=True):
         export_path = selected_path
 
     try:
-        df.to_excel(export_path, index=False)
+        wb.save(export_path)
         show_box(parent, QMessageBox.Information, "Export", f"Export successful!\n\nSaved to:\n{export_path}")
         return export_path
     except Exception as exc:
@@ -2254,6 +2279,7 @@ def main(lock=None):
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("TimesheetTracker")
+    app.setWindowIcon(create_app_icon())
 
     controller = TimesheetController(app)
     app.controller = controller
