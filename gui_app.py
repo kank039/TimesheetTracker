@@ -1076,14 +1076,14 @@ class HolidayManagerWindow(QWidget):
         section_title.setObjectName("sectionTitle")
         company_card_layout.addWidget(section_title)
 
-        company_scroll = QScrollArea()
-        company_scroll.setWidgetResizable(True)
+        self.company_scroll = QScrollArea()
+        self.company_scroll.setWidgetResizable(True)
         self.company_scroll_content = QWidget()
         self.company_scroll_layout = QVBoxLayout(self.company_scroll_content)
         self.company_scroll_layout.setContentsMargins(0, 0, 0, 0)
         self.company_scroll_layout.setSpacing(4)
-        company_scroll.setWidget(self.company_scroll_content)
-        company_card_layout.addWidget(company_scroll)
+        self.company_scroll.setWidget(self.company_scroll_content)
+        company_card_layout.addWidget(self.company_scroll)
 
         holidays_layout.addWidget(company_card, stretch=1)
 
@@ -1126,14 +1126,14 @@ class HolidayManagerWindow(QWidget):
         sep.setFrameShadow(QFrame.Shadow.Sunken)
         personal_card_layout.addWidget(sep)
 
-        personal_scroll = QScrollArea()
-        personal_scroll.setWidgetResizable(True)
+        self.personal_scroll = QScrollArea()
+        self.personal_scroll.setWidgetResizable(True)
         self.personal_scroll_content = QWidget()
         self.personal_scroll_layout = QVBoxLayout(self.personal_scroll_content)
         self.personal_scroll_layout.setContentsMargins(0, 0, 0, 0)
         self.personal_scroll_layout.setSpacing(4)
-        personal_scroll.setWidget(self.personal_scroll_content)
-        personal_card_layout.addWidget(personal_scroll)
+        self.personal_scroll.setWidget(self.personal_scroll_content)
+        personal_card_layout.addWidget(self.personal_scroll)
 
         holidays_layout.addWidget(personal_card, stretch=1)
 
@@ -1443,6 +1443,7 @@ class HolidayManagerWindow(QWidget):
         today = datetime.datetime.now().strftime("%Y-%m-%d")
         holidays = get_company_holidays()
         next_upcoming_found = False
+        target_widget = None
 
         for date_str, name in holidays:
             row = QHBoxLayout()
@@ -1480,13 +1481,28 @@ class HolidayManagerWindow(QWidget):
             container = QWidget()
             container.setLayout(row)
             self.company_scroll_layout.addWidget(container)
+            
+            if is_next:
+                target_widget = container
 
         self.company_scroll_layout.addStretch(1)
+
+        if target_widget:
+            def _scroll_company():
+                try:
+                    spacing = self.company_scroll_layout.spacing()
+                    # Scroll so that exactly 1 past item (approx target_widget.height() + spacing) is visible above the NEXT item
+                    val = max(0, target_widget.y() - target_widget.height() - spacing)
+                    self.company_scroll.verticalScrollBar().setValue(val)
+                except RuntimeError:
+                    pass
+            QTimer.singleShot(100, _scroll_company)
 
     def _populate_personal_leaves(self):
         self._clear_layout(self.personal_scroll_layout)
         all_leaves = get_all_leaves()
-        personal = [l for l in all_leaves if l["type"] == "Personal Leave"]
+        personal = sorted([l for l in all_leaves if l["type"] == "Personal Leave"], key=lambda x: x["date"])
+        target_widget = None
 
         if not personal:
             empty = QLabel("No personal leaves set yet.")
@@ -1494,18 +1510,45 @@ class HolidayManagerWindow(QWidget):
             empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.personal_scroll_layout.addWidget(empty)
         else:
+            today = datetime.datetime.now().strftime("%Y-%m-%d")
+            next_upcoming_found = False
+
             for leave in personal:
                 row = QHBoxLayout()
                 row.setSpacing(8)
 
-                date_label = QLabel(leave["date"])
-                date_label.setObjectName("leaveDate")
+                date_str = leave["date"]
+                is_past = date_str < today
+                is_next = (not is_past and not next_upcoming_found)
+
+                date_label = QLabel(date_str)
+                if is_past:
+                    date_label.setObjectName("holidayDatePast")
+                elif is_next:
+                    date_label.setObjectName("holidayDateUpcoming")
+                else:
+                    date_label.setObjectName("leaveDate")
                 row.addWidget(date_label)
 
                 reason = leave.get("name", "") or "Personal Leave"
                 name_label = QLabel(reason)
-                name_label.setObjectName("leaveName")
+                if is_past:
+                    name_label.setObjectName("holidayPast")
+                elif is_next:
+                    name_label.setObjectName("holidayUpcoming")
+                else:
+                    name_label.setObjectName("leaveName")
                 row.addWidget(name_label, stretch=1)
+                
+                if is_next:
+                    badge = QLabel("NEXT")
+                    badge.setObjectName("badge")
+                    row.addWidget(badge)
+                    next_upcoming_found = True
+                elif is_past:
+                    badge = QLabel("PAST")
+                    badge.setObjectName("badgePast")
+                    row.addWidget(badge)
 
                 remove_btn = QPushButton("Remove")
                 remove_btn.setObjectName("removeBtn")
@@ -1518,7 +1561,21 @@ class HolidayManagerWindow(QWidget):
                 container.setLayout(row)
                 self.personal_scroll_layout.addWidget(container)
 
+                if is_next:
+                    target_widget = container
+
         self.personal_scroll_layout.addStretch(1)
+
+        if target_widget:
+            def _scroll_personal():
+                try:
+                    spacing = self.personal_scroll_layout.spacing()
+                    # Scroll so that exactly 1 past item is visible above the NEXT item
+                    val = max(0, target_widget.y() - target_widget.height() - spacing)
+                    self.personal_scroll.verticalScrollBar().setValue(val)
+                except RuntimeError:
+                    pass
+            QTimer.singleShot(100, _scroll_personal)
 
     def _populate_time_blocks(self):
         self._clear_layout(self.block_scroll_layout)
