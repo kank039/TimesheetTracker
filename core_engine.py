@@ -192,6 +192,11 @@ def setup_database():
         cursor.execute("ALTER TABLE time_blocks ADD COLUMN days_of_week TEXT NOT NULL DEFAULT '0,1,2,3,4'")
     except sqlite3.OperationalError:
         pass  # column already exists
+    # Add is_default column to projects if upgrading from an older schema
+    try:
+        cursor.execute("ALTER TABLE projects ADD COLUMN is_default INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # column already exists
     conn.commit()
     conn.close()
     seed_company_holidays()
@@ -291,6 +296,73 @@ def delete_project(name):
         raise ValueError(f"Project '{name}' not found.")
     conn.commit()
     conn.close()
+
+
+def set_default_project(name):
+    """Mark a project as the default. Unmarks all others."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('UPDATE projects SET is_default = 0')
+    cursor.execute('UPDATE projects SET is_default = 1 WHERE name = ?', (name,))
+    if cursor.rowcount == 0:
+        conn.close()
+        raise ValueError(f"Project '{name}' not found.")
+    conn.commit()
+    conn.close()
+
+
+def get_default_project():
+    """Return the default project name, or None if none is set."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('SELECT name FROM projects WHERE is_default = 1 LIMIT 1')
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+
+def get_dates_with_project_entries(project_name):
+    """Return all unique dates that have timesheet entries for the given project, sorted ascending."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute(
+        'SELECT DISTINCT log_date FROM timesheet WHERE project = ? ORDER BY log_date ASC',
+        (project_name,),
+    )
+    dates = [row[0] for row in cursor.fetchall()]
+    conn.close()
+    return dates
+
+
+def reassign_project_entries(old_project, new_project):
+    """Move all timesheet entries from old_project to new_project."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute(
+        'UPDATE timesheet SET project = ? WHERE project = ?',
+        (new_project, old_project),
+    )
+    # Also update time_blocks referencing the old project
+    cursor.execute(
+        'UPDATE time_blocks SET project = ? WHERE project = ?',
+        (new_project, old_project),
+    )
+    conn.commit()
+    conn.close()
+
+
+def force_delete_project(name):
+    """Delete a project row without checking for timesheet entries.
+    Caller must reassign entries first."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM projects WHERE name = ?', (name,))
+    if cursor.rowcount == 0:
+        conn.close()
+        raise ValueError(f"Project '{name}' not found.")
+    conn.commit()
+    conn.close()
+
 
 def is_weekend(date_str):
     date_obj = datetime.datetime.strptime(date_str, "%Y-%m-%d")

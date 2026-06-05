@@ -47,8 +47,11 @@ from core_engine import (
     add_timesheet_entry,
     delete_project,
     delete_time_block,
+    force_delete_project,
     get_all_leaves,
     get_company_holidays,
+    get_dates_with_project_entries,
+    get_default_project,
     get_projects,
     get_time_blocks,
     get_timesheet_entries_for_day,
@@ -60,9 +63,11 @@ from core_engine import (
     get_unlogged_hours,
     insert_time_blocks_for_day,
     is_month_end_freeze,
+    reassign_project_entries,
     record_recent_activity,
     remove_leave,
     replace_timesheet_entries_for_day,
+    set_default_project,
     setup_database,
     toggle_time_block,
     update_project,
@@ -305,59 +310,121 @@ class ManualLogDialog(QDialog):
 
 
 class DayEntryRow(QWidget):
-    def __init__(self, entry=None, on_change=None, on_remove=None, parent=None):
+    def __init__(self, entry=None, on_change=None, on_remove=None,
+                 default_project=None, use_default=False, parent=None):
         super().__init__(parent)
         self.on_change = on_change
         self.on_remove = on_remove
+        self._default_project = default_project
 
-        layout = QGridLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setHorizontalSpacing(8)
-        layout.setVerticalSpacing(6)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        self.card = QFrame()
+        self.card.setStyleSheet(
+            "QFrame { background: #1e1e2e; border: 1px solid #45475a; border-radius: 6px; padding: 6px 8px; }"
+        )
+        card_layout = QVBoxLayout(self.card)
+        card_layout.setContentsMargins(6, 4, 6, 4)
+        card_layout.setSpacing(4)
+
+        # Row 1: Project + Activity + Remove
+        row1 = QHBoxLayout()
+        row1.setSpacing(6)
 
         self.project_combo = QComboBox()
+        self.project_combo.setMinimumWidth(120)
         projects = get_projects()
         self.project_combo.addItems(projects)
         if len(projects) == 1:
             self.project_combo.setCurrentIndex(0)
             self.project_combo.setEnabled(False)
-        layout.addWidget(QLabel("Project"), 0, 0)
-        layout.addWidget(self.project_combo, 1, 0)
+        self.project_label = QLabel("Project:")
+        self.project_label.setStyleSheet("color: #a6adc8; font-size: 10px;")
+        row1.addWidget(self.project_label)
+        row1.addWidget(self.project_combo)
 
         self.activity_combo = QComboBox()
         self.activity_combo.addItems(VALID_ACTIVITIES)
-        layout.addWidget(QLabel("Activity"), 0, 1)
-        layout.addWidget(self.activity_combo, 1, 1)
+        act_label = QLabel("Activity:")
+        act_label.setStyleSheet("color: #a6adc8; font-size: 10px;")
+        row1.addWidget(act_label)
+        row1.addWidget(self.activity_combo, stretch=1)
 
+        self.remove_button = QPushButton("✕")
+        self.remove_button.setFixedSize(26, 26)
+        self.remove_button.setStyleSheet(
+            "QPushButton { background: transparent; color: #f38ba8; border: 1px solid #f38ba8; "
+            "border-radius: 4px; font-size: 12px; font-weight: bold; }"
+            "QPushButton:hover { background: #f38ba8; color: #1e1e2e; }"
+        )
+        self.remove_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.remove_button.clicked.connect(self.handle_remove)
+        row1.addWidget(self.remove_button)
+
+        card_layout.addLayout(row1)
+
+        # Row 2: Hours + Minutes + Description
+        row2 = QHBoxLayout()
+        row2.setSpacing(6)
+
+        hr_label = QLabel("Hr:")
+        hr_label.setStyleSheet("color: #a6adc8; font-size: 10px;")
+        row2.addWidget(hr_label)
         self.hours_spin = QSpinBox()
         self.hours_spin.setRange(0, MAX_HOURS_PER_ENTRY)
-        layout.addWidget(QLabel("Hours"), 0, 2)
-        layout.addWidget(self.hours_spin, 1, 2)
+        self.hours_spin.setFixedWidth(50)
+        row2.addWidget(self.hours_spin)
 
+        min_label = QLabel("Min:")
+        min_label.setStyleSheet("color: #a6adc8; font-size: 10px;")
+        row2.addWidget(min_label)
         self.minutes_spin = QSpinBox()
         self.minutes_spin.setRange(0, 59)
-        layout.addWidget(QLabel("Minutes"), 0, 3)
-        layout.addWidget(self.minutes_spin, 1, 3)
+        self.minutes_spin.setFixedWidth(50)
+        row2.addWidget(self.minutes_spin)
 
         self.description_edit = QLineEdit()
-        self.description_edit.setPlaceholderText("Task description")
-        layout.addWidget(QLabel("Description"), 0, 4)
-        layout.addWidget(self.description_edit, 1, 4)
+        self.description_edit.setPlaceholderText("Task description…")
+        self.description_edit.setStyleSheet(
+            "QLineEdit { background: #45475a; color: #cdd6f4; border: 1px solid #585b70; "
+            "border-radius: 4px; padding: 4px 6px; font-size: 12px; }"
+        )
+        row2.addWidget(self.description_edit, stretch=1)
 
-        self.remove_button = QPushButton("Remove")
-        self.remove_button.clicked.connect(self.handle_remove)
-        layout.addWidget(self.remove_button, 1, 5)
+        card_layout.addLayout(row2)
+        outer.addWidget(self.card)
 
+        # Connect signals
         self.project_combo.currentIndexChanged.connect(self.emit_change)
         self.activity_combo.currentIndexChanged.connect(self.emit_change)
         self.hours_spin.valueChanged.connect(self.emit_change)
         self.minutes_spin.valueChanged.connect(self.emit_change)
         self.description_edit.textChanged.connect(self.emit_change)
 
+        # Apply default project visibility
+        if use_default and default_project:
+            self._apply_default(True, default_project)
+
         if entry:
             self.set_entry(entry)
         else:
             self.hours_spin.setValue(1)
+
+    def _apply_default(self, use, project_name):
+        """Show/hide project controls based on default project mode."""
+        self.project_label.setVisible(not use)
+        self.project_combo.setVisible(not use)
+        if use and project_name:
+            idx = self.project_combo.findText(project_name)
+            if idx >= 0:
+                self.project_combo.setCurrentIndex(idx)
+
+    def set_use_default(self, use, project_name):
+        """Toggle default project mode on this row."""
+        self._default_project = project_name
+        self._apply_default(use, project_name)
 
     def set_entry(self, entry):
         project = entry.get("project", "")
@@ -835,6 +902,63 @@ class HolidayManagerWindow(QWidget):
             font-size: 10px;
             font-family: 'Segoe UI', sans-serif;
         }
+        /* ── Day Entries editor styles ── */
+        QLabel#entrySummary {
+            color: #f9e2af;
+            font-size: 13px;
+            font-weight: 600;
+            font-family: 'Segoe UI', sans-serif;
+            padding: 4px 0;
+        }
+        QLabel#entrySummaryError {
+            color: #f38ba8;
+            font-size: 13px;
+            font-weight: 600;
+            font-family: 'Segoe UI', sans-serif;
+            padding: 4px 0;
+        }
+        QLabel#entryHint {
+            color: #6c7086;
+            font-size: 11px;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        QPushButton#saveBtn {
+            background: #a6e3a1;
+            color: #1e1e2e;
+            border: none;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            padding: 6px 18px;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        QPushButton#saveBtn:hover {
+            background: #c6f0c4;
+        }
+        QPushButton#saveBtn:disabled {
+            background: #45475a;
+            color: #6c7086;
+        }
+        QPushButton#addTaskBtn {
+            background: transparent;
+            color: #89b4fa;
+            border: 1px solid #89b4fa;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            padding: 6px 14px;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        QPushButton#addTaskBtn:hover {
+            background: #89b4fa;
+            color: #1e1e2e;
+        }
+        QFrame#entryRow {
+            background: #1e1e2e;
+            border: 1px solid #45475a;
+            border-radius: 6px;
+            padding: 8px;
+        }
         /* ── Tab widget styles ── */
         QTabWidget::pane {
             border: 1px solid #45475a;
@@ -1107,9 +1231,116 @@ class HolidayManagerWindow(QWidget):
 
         self.tabs.addTab(blocks_tab, "⏱  Time Blocking")
 
+        # ═══════════════════════════════════════════
+        # TAB 3: Day Entries (View & Edit)
+        # ═══════════════════════════════════════════
+        entries_tab = QWidget()
+        entries_layout = QVBoxLayout(entries_tab)
+        entries_layout.setContentsMargins(8, 12, 8, 8)
+        entries_layout.setSpacing(10)
+
+        entries_card = QFrame()
+        entries_card.setObjectName("card")
+        entries_card_layout = QVBoxLayout(entries_card)
+        entries_card_layout.setSpacing(8)
+
+        section_title4 = QLabel("📋  View & Edit Day Entries")
+        section_title4.setObjectName("sectionTitle")
+        entries_card_layout.addWidget(section_title4)
+
+        hint_label = QLabel(f"Pick a date to view logged entries. Edit rows and save — the day must total {MAX_HOURS_PER_DAY} hours.")
+        hint_label.setObjectName("entryHint")
+        hint_label.setWordWrap(True)
+        entries_card_layout.addWidget(hint_label)
+
+        # Date picker row
+        entry_date_row = QHBoxLayout()
+        entry_date_row.setSpacing(8)
+
+        date_lbl = QLabel("Date:")
+        date_lbl.setObjectName("formLabel")
+        entry_date_row.addWidget(date_lbl)
+
+        self.entry_date_edit = QDateEdit()
+        self.entry_date_edit.setCalendarPopup(True)
+        self.entry_date_edit.setDisplayFormat("yyyy-MM-dd")
+        self.entry_date_edit.setDate(QDate.currentDate())
+        self.entry_date_edit.setMaximumDate(QDate.currentDate())
+        self.entry_date_edit.dateChanged.connect(self._load_entries_for_date)
+        entry_date_row.addWidget(self.entry_date_edit)
+
+        entry_date_row.addStretch(1)
+
+        # Default project checkbox
+        self.use_default_check = QCheckBox("Use default project")
+        self.use_default_check.setObjectName("dayCheck")
+        default_proj = get_default_project()
+        self.use_default_check.setEnabled(default_proj is not None)
+        self.use_default_check.setChecked(default_proj is not None)
+        if not default_proj:
+            self.use_default_check.setToolTip("Set a default project in Manage Projects first")
+        else:
+            self.use_default_check.setToolTip(f"Default: {default_proj}")
+        self.use_default_check.toggled.connect(self._toggle_default_project)
+        entry_date_row.addWidget(self.use_default_check)
+
+        entries_card_layout.addLayout(entry_date_row)
+
+        # Summary label
+        self.entry_summary_label = QLabel("")
+        self.entry_summary_label.setObjectName("entrySummary")
+        entries_card_layout.addWidget(self.entry_summary_label)
+
+        # Separator
+        sep3 = QFrame()
+        sep3.setFrameShape(QFrame.Shape.HLine)
+        sep3.setStyleSheet("color: #45475a;")
+        entries_card_layout.addWidget(sep3)
+
+        # Scroll area for entry rows
+        entry_scroll = QScrollArea()
+        entry_scroll.setWidgetResizable(True)
+        self.entry_scroll_content = QWidget()
+        self.entry_scroll_layout = QVBoxLayout(self.entry_scroll_content)
+        self.entry_scroll_layout.setContentsMargins(0, 0, 0, 0)
+        self.entry_scroll_layout.setSpacing(8)
+        self.entry_scroll_layout.addStretch(1)
+        entry_scroll.setWidget(self.entry_scroll_content)
+        entries_card_layout.addWidget(entry_scroll)
+
+        # Button row: Add Task + Save Day
+        entry_btn_row = QHBoxLayout()
+        entry_btn_row.setSpacing(8)
+
+        add_task_btn = QPushButton("+ Add Task")
+        add_task_btn.setObjectName("addTaskBtn")
+        add_task_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        add_task_btn.clicked.connect(self._add_blank_entry_row)
+        entry_btn_row.addWidget(add_task_btn)
+
+        entry_btn_row.addStretch(1)
+
+        self.entry_save_btn = QPushButton("💾  Save Day")
+        self.entry_save_btn.setObjectName("saveBtn")
+        self.entry_save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.entry_save_btn.clicked.connect(self._save_day_entries)
+        self.entry_save_btn.setEnabled(False)
+        entry_btn_row.addWidget(self.entry_save_btn)
+
+        entries_card_layout.addLayout(entry_btn_row)
+
+        entries_layout.addWidget(entries_card, stretch=1)
+
+        self.tabs.addTab(entries_tab, "📋  Day Entries")
+
+        # ── Internal state for entry editor ──
+        self.entry_rows = []
+        self.entry_loading = False
+
         root.addWidget(self.tabs, stretch=1)
 
         self.populate()
+        self._load_entries_for_date()
 
     # ── Data population ──
 
@@ -1378,6 +1609,238 @@ class HolidayManagerWindow(QWidget):
         except ValueError as exc:
             show_box(self, QMessageBox.Icon.Warning, "Cannot Remove", str(exc))
 
+    # ── Day Entries tab actions ──
+
+    def _entry_date_str(self):
+        return self.entry_date_edit.date().toString("yyyy-MM-dd")
+
+    def _clear_entry_rows(self):
+        while self.entry_rows:
+            row = self.entry_rows.pop()
+            row.setParent(None)
+            row.deleteLater()
+
+    def _add_entry_row(self, entry=None):
+        default_proj = get_default_project()
+        use = self.use_default_check.isChecked() and default_proj is not None
+        row = DayEntryRow(
+            entry=entry,
+            on_change=self._update_entry_summary,
+            on_remove=self._remove_entry_row,
+            default_project=default_proj,
+            use_default=use,
+        )
+        insert_at = self.entry_scroll_layout.count() - 1  # before the stretch
+        self.entry_scroll_layout.insertWidget(insert_at, row)
+        self.entry_rows.append(row)
+        return row
+
+    def _add_blank_entry_row(self):
+        self._add_entry_row()
+        self._update_entry_summary()
+
+    def _remove_entry_row(self, row):
+        if len(self.entry_rows) <= 1:
+            show_box(self, QMessageBox.Warning, "Day Entries", "Keep at least one task row.")
+            return
+        self.entry_rows.remove(row)
+        row.setParent(None)
+        row.deleteLater()
+        self._update_entry_summary()
+
+    def _toggle_default_project(self, checked):
+        """Toggle default project on all existing rows (option A: override all)."""
+        default_proj = get_default_project()
+        for row in self.entry_rows:
+            row.set_use_default(checked and default_proj is not None, default_proj)
+        self._update_entry_summary()
+
+    def _load_entries_for_date(self, _date=None):
+        date_str = self._entry_date_str()
+        self.entry_loading = True
+        try:
+            self._clear_entry_rows()
+            entries = get_timesheet_entries_for_day(date_str)
+            if not entries:
+                self._add_entry_row()
+            else:
+                for entry in entries:
+                    self._add_entry_row(entry)
+        finally:
+            self.entry_loading = False
+        self._update_entry_summary()
+
+    def _collect_entries(self):
+        return [row.get_entry() for row in self.entry_rows]
+
+    def _validate_entries(self):
+        entries = self._collect_entries()
+        if not entries:
+            return False, "Add at least one task."
+        total_minutes = 0
+        valid_projects = get_projects()
+        for entry in entries:
+            if entry["project"] not in valid_projects:
+                return False, "Select a valid project for every row."
+            if entry["activity"] not in VALID_ACTIVITIES:
+                return False, "Select a valid activity for every row."
+            if not entry["description"]:
+                return False, "Description cannot be empty."
+            hours = int(entry.get("hours", 0))
+            minutes = int(entry.get("minutes", 0))
+            if hours < 0 or hours > MAX_HOURS_PER_ENTRY:
+                return False, f"Each row must be ≤ {MAX_HOURS_PER_ENTRY}h."
+            if minutes < 0 or minutes > 59:
+                return False, "Minutes must be 0–59."
+            if hours == 0 and minutes == 0:
+                return False, "Each row needs a positive time."
+            total_minutes += hours * 60 + minutes
+        if total_minutes != MAX_HOURS_PER_DAY * 60:
+            return False, f"Total must equal {MAX_HOURS_PER_DAY}h."
+        return True, ""
+
+    def _update_entry_summary(self):
+        if self.entry_loading:
+            return
+        entries = self._collect_entries()
+        total_minutes = sum(e.get("hours", 0) * 60 + e.get("minutes", 0) for e in entries)
+        th = total_minutes // 60
+        tm = total_minutes % 60
+        valid, message = self._validate_entries()
+        if valid:
+            self.entry_summary_label.setText(f"Total: {th}h {tm}m / {MAX_HOURS_PER_DAY}h  ✓ Ready to save")
+            self.entry_summary_label.setObjectName("entrySummary")
+        else:
+            self.entry_summary_label.setText(f"Total: {th}h {tm}m / {MAX_HOURS_PER_DAY}h  —  {message}")
+            self.entry_summary_label.setObjectName("entrySummaryError")
+        # Force style refresh after objectName change
+        self.entry_summary_label.setStyleSheet(self.entry_summary_label.styleSheet())
+        self.entry_summary_label.style().unpolish(self.entry_summary_label)
+        self.entry_summary_label.style().polish(self.entry_summary_label)
+        self.entry_save_btn.setEnabled(valid)
+
+    def _save_day_entries(self):
+        date_str = self._entry_date_str()
+        entries = self._collect_entries()
+        try:
+            replace_timesheet_entries_for_day(date_str, entries)
+            for activity in dict.fromkeys(e["activity"] for e in entries):
+                record_recent_activity(activity)
+            show_box(self, QMessageBox.Information, "Saved", f"Updated {date_str} successfully.")
+            self._load_entries_for_date()
+        except Exception as exc:
+            show_box(self, QMessageBox.Critical, "Save Failed", str(exc))
+
+    def navigate_to_date(self, date_str):
+        """Navigate the Day Entries tab to a specific date (used by project deletion review)."""
+        self.tabs.setCurrentIndex(2)  # Day Entries tab
+        qdate = QDate.fromString(date_str, "yyyy-MM-dd")
+        if qdate.isValid():
+            self.entry_date_edit.setDate(qdate)
+
+
+class ProjectDeleteDialog(QDialog):
+    STYLE = """
+        ProjectDeleteDialog { background: #1e1e2e; }
+        QLabel { color: #cdd6f4; font-size: 13px; font-family: 'Segoe UI', sans-serif; }
+        QLabel#dialogTitle { font-size: 16px; font-weight: 700; }
+        QRadioButton { color: #cdd6f4; font-size: 13px; font-family: 'Segoe UI', sans-serif; }
+        QRadioButton::indicator { width: 14px; height: 14px; border-radius: 7px; border: 1px solid #585b70; background: transparent; }
+        QRadioButton::indicator:checked { background: #89b4fa; border: 1px solid #89b4fa; }
+        QComboBox { background: #45475a; color: #cdd6f4; border: 1px solid #585b70; border-radius: 4px; padding: 4px 8px; }
+        QLineEdit { background: #45475a; color: #cdd6f4; border: 1px solid #585b70; border-radius: 4px; padding: 4px 8px; }
+        QPushButton { background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; padding: 6px 16px; font-weight: 600; }
+        QPushButton:hover { background: #585b70; }
+        QPushButton#primaryBtn { background: #f38ba8; color: #1e1e2e; }
+        QPushButton#primaryBtn:hover { background: #fab387; }
+    """
+
+    def __init__(self, project_name, dates, other_projects, parent=None):
+        super().__init__(parent)
+        self.project_name = project_name
+        self.dates = dates
+        self.other_projects = other_projects
+        
+        self.setWindowTitle("Delete Project")
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self.setStyleSheet(self.STYLE)
+        
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        
+        title = QLabel(f"Project '{project_name}' is in use")
+        title.setObjectName("dialogTitle")
+        layout.addWidget(title)
+        
+        sub = QLabel(f"There are {len(dates)} days with timesheet entries referencing this project. You cannot delete it directly. Choose an action:")
+        sub.setWordWrap(True)
+        layout.addWidget(sub)
+        
+        # Options
+        self.radio_reassign = QRadioButton("Reassign entries to existing project")
+        self.combo_projects = QComboBox()
+        self.combo_projects.addItems(other_projects)
+        self.combo_projects.setEnabled(bool(other_projects))
+        self.radio_reassign.setEnabled(bool(other_projects))
+        
+        self.radio_rename = QRadioButton("Rename project entirely")
+        self.edit_rename = QLineEdit()
+        self.edit_rename.setPlaceholderText("New project name")
+        
+        self.radio_review = QRadioButton("Review entries day-by-day")
+        review_lbl = QLabel(f"(Starts at {dates[0]})")
+        review_lbl.setStyleSheet("color: #6c7086; font-size: 11px;")
+        
+        # Add to layout
+        opt1 = QHBoxLayout()
+        opt1.addWidget(self.radio_reassign)
+        opt1.addWidget(self.combo_projects)
+        opt1.addStretch()
+        
+        opt2 = QHBoxLayout()
+        opt2.addWidget(self.radio_rename)
+        opt2.addWidget(self.edit_rename)
+        opt2.addStretch()
+        
+        opt3 = QHBoxLayout()
+        opt3.addWidget(self.radio_review)
+        opt3.addWidget(review_lbl)
+        opt3.addStretch()
+        
+        layout.addLayout(opt1)
+        layout.addLayout(opt2)
+        layout.addLayout(opt3)
+        
+        # Auto-select
+        if other_projects:
+            self.radio_reassign.setChecked(True)
+        else:
+            self.radio_rename.setChecked(True)
+            
+        # Buttons
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(cancel_btn)
+        
+        self.proceed_btn = QPushButton("Proceed")
+        self.proceed_btn.setObjectName("primaryBtn")
+        self.proceed_btn.clicked.connect(self.accept)
+        btn_row.addWidget(self.proceed_btn)
+        
+        layout.addLayout(btn_row)
+        
+    def get_action(self):
+        if self.radio_reassign.isChecked():
+            return "reassign", self.combo_projects.currentText()
+        elif self.radio_rename.isChecked():
+            return "rename", self.edit_rename.text().strip()
+        elif self.radio_review.isChecked():
+            return "review", self.dates[0]
+        return None, None
+
 
 class ProjectManagerDialog(QDialog):
     """Dialog to add, rename, and delete projects."""
@@ -1454,6 +1917,19 @@ class ProjectManagerDialog(QDialog):
         }
         QPushButton#deleteBtn:hover {
             background: #f38ba8;
+            color: #1e1e2e;
+        }
+        QPushButton#defaultBtn {
+            background: transparent;
+            color: #f9e2af;
+            border: 1px solid #f9e2af;
+            border-radius: 4px;
+            font-size: 11px;
+            padding: 2px 10px;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        QPushButton#defaultBtn:hover {
+            background: #f9e2af;
             color: #1e1e2e;
         }
         QLabel#emptyState {
@@ -1575,13 +2051,24 @@ class ProjectManagerDialog(QDialog):
             empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.scroll_layout.addWidget(empty)
         else:
+            default_proj = get_default_project()
             for name in projects:
                 row = QHBoxLayout()
                 row.setSpacing(8)
 
-                label = QLabel(name)
+                label_text = f"{name}  [DEFAULT]" if name == default_proj else name
+                label = QLabel(label_text)
                 label.setObjectName("projectName")
+                if name == default_proj:
+                    label.setStyleSheet("color: #f9e2af; font-weight: bold;")
                 row.addWidget(label, stretch=1)
+
+                if name != default_proj:
+                    default_btn = QPushButton("Set Default")
+                    default_btn.setObjectName("defaultBtn")
+                    default_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                    default_btn.clicked.connect(lambda checked, n=name: self.set_default(n))
+                    row.addWidget(default_btn)
 
                 rename_btn = QPushButton("Rename")
                 rename_btn.setObjectName("renameBtn")
@@ -1624,14 +2111,46 @@ class ProjectManagerDialog(QDialog):
         except ValueError as exc:
             show_box(self, QMessageBox.Icon.Warning, "Rename Project", str(exc))
 
+    def set_default(self, name):
+        try:
+            set_default_project(name)
+            self.populate()
+        except ValueError as exc:
+            show_box(self, QMessageBox.Icon.Warning, "Set Default", str(exc))
+
     def remove_project(self, name):
-        if not ask_yes_no(self, "Delete Project", f"Delete project '{name}'?\n\nThis cannot be undone."):
-            return
         try:
             delete_project(name)
             self.populate()
         except ValueError as exc:
-            show_box(self, QMessageBox.Icon.Warning, "Delete Project", str(exc))
+            if "entries reference it" in str(exc):
+                dates = get_dates_with_project_entries(name)
+                other_projects = [p for p in get_projects() if p != name]
+                dialog = ProjectDeleteDialog(name, dates, other_projects, self)
+                if dialog.exec() == QDialog.DialogCode.Accepted:
+                    action, value = dialog.get_action()
+                    if action == "reassign":
+                        reassign_project_entries(name, value)
+                        force_delete_project(name)
+                        self.populate()
+                    elif action == "rename":
+                        if not value:
+                            show_box(self, QMessageBox.Icon.Warning, "Rename", "Name cannot be empty.")
+                            return
+                        try:
+                            update_project(name, value)
+                            self.populate()
+                        except ValueError as e:
+                            show_box(self, QMessageBox.Icon.Warning, "Rename", str(e))
+                    elif action == "review":
+                        self.accept()  # Close Project Manager
+                        ctrl = self.parent()
+                        if hasattr(ctrl, "show_holiday_window"):
+                            ctrl.show_holiday_window()
+                            if ctrl.holiday_window:
+                                ctrl.holiday_window.navigate_to_date(value)
+            else:
+                show_box(self, QMessageBox.Icon.Warning, "Delete Project", str(exc))
 
 
 class TimesheetController(QWidget):
