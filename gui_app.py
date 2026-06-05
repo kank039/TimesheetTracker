@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QPushButton,
     QSpinBox,
+    QTabWidget,
     QTextEdit,
     QSystemTrayIcon,
     QVBoxLayout,
@@ -834,13 +835,43 @@ class HolidayManagerWindow(QWidget):
             font-size: 10px;
             font-family: 'Segoe UI', sans-serif;
         }
+        /* ── Tab widget styles ── */
+        QTabWidget::pane {
+            border: 1px solid #45475a;
+            border-radius: 8px;
+            background: transparent;
+            top: -1px;
+        }
+        QTabBar::tab {
+            background: #313244;
+            color: #a6adc8;
+            border: 1px solid #45475a;
+            border-bottom: none;
+            border-top-left-radius: 8px;
+            border-top-right-radius: 8px;
+            padding: 8px 24px;
+            margin-right: 4px;
+            font-size: 13px;
+            font-weight: 600;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        QTabBar::tab:selected {
+            background: #1e1e2e;
+            color: #89b4fa;
+            border-color: #89b4fa;
+            border-bottom: 2px solid #1e1e2e;
+        }
+        QTabBar::tab:hover:!selected {
+            background: #45475a;
+            color: #cdd6f4;
+        }
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Timesheet Tracker — Holidays, Leaves & Time Blocks")
-        self.setMinimumSize(1150, 560)
-        self.resize(1200, 600)
+        self.setMinimumSize(580, 520)
+        self.resize(780, 600)
         self.setStyleSheet(self.STYLE)
         self.setWindowIcon(create_app_icon())
 
@@ -858,40 +889,48 @@ class HolidayManagerWindow(QWidget):
         sub.setWordWrap(True)
         root.addWidget(sub)
 
-        # Three-panel horizontal layout
-        panels = QHBoxLayout()
-        panels.setSpacing(14)
+        # ── Tabbed layout ──
+        self.tabs = QTabWidget()
+        self.tabs.setDocumentMode(False)
 
-        # ── Left panel: Company Holidays ──
-        left_card = QFrame()
-        left_card.setObjectName("card")
-        left_layout = QVBoxLayout(left_card)
-        left_layout.setSpacing(6)
+        # ═══════════════════════════════════════════
+        # TAB 1: Holidays & Leaves
+        # ═══════════════════════════════════════════
+        holidays_tab = QWidget()
+        holidays_layout = QVBoxLayout(holidays_tab)
+        holidays_layout.setContentsMargins(8, 12, 8, 8)
+        holidays_layout.setSpacing(12)
+
+        # ── Company Holidays section ──
+        company_card = QFrame()
+        company_card.setObjectName("card")
+        company_card_layout = QVBoxLayout(company_card)
+        company_card_layout.setSpacing(6)
 
         section_title = QLabel("🏢  Company Holidays (2026)")
         section_title.setObjectName("sectionTitle")
-        left_layout.addWidget(section_title)
+        company_card_layout.addWidget(section_title)
 
-        left_scroll = QScrollArea()
-        left_scroll.setWidgetResizable(True)
+        company_scroll = QScrollArea()
+        company_scroll.setWidgetResizable(True)
         self.company_scroll_content = QWidget()
         self.company_scroll_layout = QVBoxLayout(self.company_scroll_content)
         self.company_scroll_layout.setContentsMargins(0, 0, 0, 0)
         self.company_scroll_layout.setSpacing(4)
-        left_scroll.setWidget(self.company_scroll_content)
-        left_layout.addWidget(left_scroll)
+        company_scroll.setWidget(self.company_scroll_content)
+        company_card_layout.addWidget(company_scroll)
 
-        panels.addWidget(left_card, stretch=1)
+        holidays_layout.addWidget(company_card, stretch=1)
 
-        # ── Center panel: Personal Leaves ──
-        center_card = QFrame()
-        center_card.setObjectName("card")
-        center_layout = QVBoxLayout(center_card)
-        center_layout.setSpacing(8)
+        # ── Personal Leaves section ──
+        personal_card = QFrame()
+        personal_card.setObjectName("card")
+        personal_card_layout = QVBoxLayout(personal_card)
+        personal_card_layout.setSpacing(8)
 
         section_title2 = QLabel("🧘  My Personal Leaves")
         section_title2.setObjectName("sectionTitle")
-        center_layout.addWidget(section_title2)
+        personal_card_layout.addWidget(section_title2)
 
         # Add-leave form
         form_row = QHBoxLayout()
@@ -914,34 +953,43 @@ class HolidayManagerWindow(QWidget):
         add_btn.clicked.connect(self.add_personal_leave)
         form_row.addWidget(add_btn)
 
-        center_layout.addLayout(form_row)
+        personal_card_layout.addLayout(form_row)
 
         # Separator line
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
         sep.setStyleSheet("color: #45475a;")
-        center_layout.addWidget(sep)
+        personal_card_layout.addWidget(sep)
 
-        center_scroll = QScrollArea()
-        center_scroll.setWidgetResizable(True)
+        personal_scroll = QScrollArea()
+        personal_scroll.setWidgetResizable(True)
         self.personal_scroll_content = QWidget()
         self.personal_scroll_layout = QVBoxLayout(self.personal_scroll_content)
         self.personal_scroll_layout.setContentsMargins(0, 0, 0, 0)
         self.personal_scroll_layout.setSpacing(4)
-        center_scroll.setWidget(self.personal_scroll_content)
-        center_layout.addWidget(center_scroll)
+        personal_scroll.setWidget(self.personal_scroll_content)
+        personal_card_layout.addWidget(personal_scroll)
 
-        panels.addWidget(center_card, stretch=1)
+        holidays_layout.addWidget(personal_card, stretch=1)
 
-        # ── Right panel: Time Blocks ──
-        right_card = QFrame()
-        right_card.setObjectName("card")
-        right_layout = QVBoxLayout(right_card)
-        right_layout.setSpacing(6)
+        self.tabs.addTab(holidays_tab, "🏖  Holidays && Leaves")
+
+        # ═══════════════════════════════════════════
+        # TAB 2: Time Blocking
+        # ═══════════════════════════════════════════
+        blocks_tab = QWidget()
+        blocks_layout = QVBoxLayout(blocks_tab)
+        blocks_layout.setContentsMargins(8, 12, 8, 8)
+        blocks_layout.setSpacing(12)
+
+        blocks_card = QFrame()
+        blocks_card.setObjectName("card")
+        blocks_card_layout = QVBoxLayout(blocks_card)
+        blocks_card_layout.setSpacing(6)
 
         section_title3 = QLabel("⏱  Time Blocks")
         section_title3.setObjectName("sectionTitle")
-        right_layout.addWidget(section_title3)
+        blocks_card_layout.addWidget(section_title3)
 
         # -- Add block form --
         block_form = QVBoxLayout()
@@ -1032,13 +1080,13 @@ class HolidayManagerWindow(QWidget):
 
         block_form.addLayout(days_btn_row)
 
-        right_layout.addLayout(block_form)
+        blocks_card_layout.addLayout(block_form)
 
         # Separator
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.Shape.HLine)
         sep2.setStyleSheet("color: #45475a;")
-        right_layout.addWidget(sep2)
+        blocks_card_layout.addWidget(sep2)
 
         # Block list scroll
         block_scroll = QScrollArea()
@@ -1048,16 +1096,18 @@ class HolidayManagerWindow(QWidget):
         self.block_scroll_layout.setContentsMargins(0, 0, 0, 0)
         self.block_scroll_layout.setSpacing(6)
         block_scroll.setWidget(self.block_scroll_content)
-        right_layout.addWidget(block_scroll)
+        blocks_card_layout.addWidget(block_scroll)
 
         # Total footer
         self.block_total_label = QLabel("")
         self.block_total_label.setObjectName("blockTotal")
-        right_layout.addWidget(self.block_total_label)
+        blocks_card_layout.addWidget(self.block_total_label)
 
-        panels.addWidget(right_card, stretch=1)
+        blocks_layout.addWidget(blocks_card, stretch=1)
 
-        root.addLayout(panels, stretch=1)
+        self.tabs.addTab(blocks_tab, "⏱  Time Blocking")
+
+        root.addWidget(self.tabs, stretch=1)
 
         self.populate()
 
