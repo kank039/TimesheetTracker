@@ -21,7 +21,7 @@
 | ⏱️ **Time Blocks** | Define recurring auto-entries (e.g. "Daily SCRUM — 30 min, Mon–Fri"). Automatically inserted as real timesheet rows each qualifying day — idempotent and respects weekends/holidays. |
 | 📊 **One-Click Export** | Generates a perfectly-formatted Excel (`.xlsx`) matching the RAM – Project Transcend 2026 template. Choose where to save via a Qt file dialog. |
 | 🔒 **Single-Instance Guard** | A `QLockFile` prevents multiple copies of the app from running simultaneously. |
-| 🖥️ **PySide6 UI** | Native Qt dialogs and tray integration — no Tkinter flicker, no Windows Explorer save-dialog bugs. |
+| 🖥️ **PyQt6 UI** | Native Qt dialogs and tray integration — no Tkinter flicker, no Windows Explorer save-dialog bugs. |
 
 ---
 
@@ -102,7 +102,7 @@ TimesheetTracker/
 ├── main.py                     # Entry point — acquires single-instance lock, launches GUI
 ├── single_instance.py          # QLockFile-based single-instance guard
 ├── core_engine.py              # All business logic, DB, validation, and date helpers
-├── gui_app.py                  # PySide6 UI: tray, dialogs, and the background daemon loop
+├── gui_app.py                  # PyQt6 UI: tray, dialogs, and the background daemon loop
 ├── app.ico                     # Application icon
 ├── version.txt                 # PyInstaller version resource file
 ├── pyproject.toml              # uv / pip project manifest with dependencies
@@ -130,6 +130,8 @@ uv run python main.py
 # 3. Compile to a single .exe
 uv run pyinstaller TimesheetTracker.spec
 
+uv run pyinstaller --noconsole --onefile --name "TimesheetTracker" --icon=app.ico --version-file=version.txt main.py
+
 # 4. Package the installer (requires Inno Setup installed)
 iscc TimesheetTracker_Setup.iss
 ```
@@ -145,8 +147,8 @@ iscc TimesheetTracker_Setup.iss
 - **Changed:** Time block insertion now respects the block's `days_of_week` — a SCRUM block set to Mon–Fri won't fire on a Wednesday if it's not in the list.
 - **Fixed:** Schema migration — `ALTER TABLE` guards silently add new columns to existing databases without data loss.
 
-### [v1.2.0] — PySide6 UI Rewrite
-- **Changed:** Replaced Tkinter and pystray with a single PySide6 event loop.
+### [v1.2.0] — PyQt6 UI Rewrite
+- **Changed:** Replaced Tkinter and pystray with a single PyQt6 event loop.
 - **Changed:** Export now opens a Qt save dialog so you can choose the destination.
 - **Changed:** Export success and error dialogs use Qt-native modal windows.
 

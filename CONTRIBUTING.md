@@ -51,7 +51,7 @@ uv sync
 ```
 
 This creates a `.venv/` folder and installs:
-- `PySide6` — Qt bindings for the GUI and tray
+- `PyQt6` — Qt bindings for the GUI and tray
 - `pandas` — DataFrame used for the Excel export
 - `openpyxl` — Excel writer backend
 - `pyinstaller` — compiles to `.exe`
@@ -84,7 +84,7 @@ The tray icon appears in the Windows notification area. You can right-click it f
 ```
 main.py                  ← entry point
   └─ single_instance.py  ← QLockFile guard (one process at a time)
-  └─ gui_app.py          ← all PySide6 code + background daemon
+  └─ gui_app.py          ← all PyQt6 code + background daemon
        └─ core_engine.py ← all business logic, DB, validation helpers
 ```
 

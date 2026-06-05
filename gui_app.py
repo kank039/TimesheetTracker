@@ -6,9 +6,9 @@ import sys
 
 import pandas as pd
 import winreg
-from PySide6.QtCore import QDate, QTimer, Qt
-from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
-from PySide6.QtWidgets import (
+from PyQt6.QtCore import QDate, QTimer, Qt
+from PyQt6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
+from PyQt6.QtWidgets import (
     QApplication,
     QDateEdit,
     QCheckBox,
@@ -323,9 +323,7 @@ class DayEntryRow(QWidget):
         outer.setSpacing(0)
 
         self.card = QFrame()
-        self.card.setStyleSheet(
-            "QFrame { background: #1e1e2e; border: 1px solid #45475a; border-radius: 6px; padding: 6px 8px; }"
-        )
+        self.card.setFrameShape(QFrame.Shape.StyledPanel)
         card_layout = QVBoxLayout(self.card)
         card_layout.setContentsMargins(6, 4, 6, 4)
         card_layout.setSpacing(4)
@@ -342,24 +340,17 @@ class DayEntryRow(QWidget):
             self.project_combo.setCurrentIndex(0)
             self.project_combo.setEnabled(False)
         self.project_label = QLabel("Project:")
-        self.project_label.setStyleSheet("color: #a6adc8; font-size: 10px;")
         row1.addWidget(self.project_label)
         row1.addWidget(self.project_combo)
 
         self.activity_combo = QComboBox()
         self.activity_combo.addItems(VALID_ACTIVITIES)
         act_label = QLabel("Activity:")
-        act_label.setStyleSheet("color: #a6adc8; font-size: 10px;")
         row1.addWidget(act_label)
         row1.addWidget(self.activity_combo, stretch=1)
 
         self.remove_button = QPushButton("✕")
         self.remove_button.setFixedSize(26, 26)
-        self.remove_button.setStyleSheet(
-            "QPushButton { background: transparent; color: #f38ba8; border: 1px solid #f38ba8; "
-            "border-radius: 4px; font-size: 12px; font-weight: bold; }"
-            "QPushButton:hover { background: #f38ba8; color: #1e1e2e; }"
-        )
         self.remove_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.remove_button.clicked.connect(self.handle_remove)
         row1.addWidget(self.remove_button)
@@ -371,27 +362,21 @@ class DayEntryRow(QWidget):
         row2.setSpacing(6)
 
         hr_label = QLabel("Hr:")
-        hr_label.setStyleSheet("color: #a6adc8; font-size: 10px;")
         row2.addWidget(hr_label)
         self.hours_spin = QSpinBox()
         self.hours_spin.setRange(0, MAX_HOURS_PER_ENTRY)
-        self.hours_spin.setFixedWidth(50)
+        # removed fixed width so numbers are visible
         row2.addWidget(self.hours_spin)
 
         min_label = QLabel("Min:")
-        min_label.setStyleSheet("color: #a6adc8; font-size: 10px;")
         row2.addWidget(min_label)
         self.minutes_spin = QSpinBox()
         self.minutes_spin.setRange(0, 59)
-        self.minutes_spin.setFixedWidth(50)
+        # removed fixed width so numbers are visible
         row2.addWidget(self.minutes_spin)
 
         self.description_edit = QLineEdit()
         self.description_edit.setPlaceholderText("Task description…")
-        self.description_edit.setStyleSheet(
-            "QLineEdit { background: #45475a; color: #cdd6f4; border: 1px solid #585b70; "
-            "border-radius: 4px; padding: 4px 6px; font-size: 12px; }"
-        )
         row2.addWidget(self.description_edit, stretch=1)
 
         card_layout.addLayout(row2)
@@ -856,7 +841,7 @@ class HolidayManagerWindow(QWidget):
             font-size: 12px;
             font-family: 'Segoe UI', sans-serif;
         }
-        QComboBox#blockCombo {
+        QComboBox {
             background: #45475a;
             color: #cdd6f4;
             border: 1px solid #585b70;
@@ -865,7 +850,20 @@ class HolidayManagerWindow(QWidget):
             font-size: 11px;
             font-family: 'Segoe UI', sans-serif;
         }
-        QSpinBox#blockSpin {
+        QComboBox::drop-down {
+            subcontrol-origin: padding;
+            subcontrol-position: top right;
+            width: 20px;
+            border-left: none;
+        }
+        QComboBox QAbstractItemView {
+            background: #313244;
+            color: #cdd6f4;
+            selection-background-color: #45475a;
+            border: 1px solid #585b70;
+            border-radius: 4px;
+        }
+        QSpinBox {
             background: #45475a;
             color: #cdd6f4;
             border: 1px solid #585b70;
@@ -873,7 +871,6 @@ class HolidayManagerWindow(QWidget):
             padding: 4px 6px;
             font-size: 12px;
             font-family: 'Segoe UI', sans-serif;
-            max-width: 60px;
         }
         QLabel#blockName {
             color: #cdd6f4;
@@ -935,22 +932,11 @@ class HolidayManagerWindow(QWidget):
             font-family: 'Segoe UI', sans-serif;
             padding: 6px 0;
         }
-        QCheckBox#dayCheck {
+        QCheckBox {
             color: #a6adc8;
-            font-size: 10px;
+            font-size: 11px;
             font-family: 'Segoe UI', sans-serif;
-            spacing: 3px;
-        }
-        QCheckBox#dayCheck::indicator {
-            width: 14px;
-            height: 14px;
-            border: 1px solid #585b70;
-            border-radius: 3px;
-            background: #45475a;
-        }
-        QCheckBox#dayCheck::indicator:checked {
-            background: #89b4fa;
-            border-color: #89b4fa;
+            spacing: 6px;
         }
         QLabel#formLabel {
             color: #a6adc8;
@@ -1051,7 +1037,7 @@ class HolidayManagerWindow(QWidget):
         self.setWindowTitle("Timesheet Tracker — Holidays, Leaves & Time Blocks")
         self.setMinimumSize(580, 520)
         self.resize(780, 600)
-        self.setStyleSheet(self.STYLE)
+        # self.setStyleSheet(self.STYLE)
         self.setWindowIcon(create_app_icon())
 
         root = QVBoxLayout(self)
@@ -1137,7 +1123,7 @@ class HolidayManagerWindow(QWidget):
         # Separator line
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet("color: #45475a;")
+        sep.setFrameShadow(QFrame.Shadow.Sunken)
         personal_card_layout.addWidget(sep)
 
         personal_scroll = QScrollArea()
@@ -1174,17 +1160,7 @@ class HolidayManagerWindow(QWidget):
         block_form = QVBoxLayout()
         block_form.setSpacing(4)
 
-        # Row 1: Name
-        name_row = QHBoxLayout()
-        name_row.setSpacing(6)
-        name_lbl = QLabel("Name")
-        name_lbl.setObjectName("formLabel")
-        name_row.addWidget(name_lbl)
-        self.block_name_edit = QLineEdit()
-        self.block_name_edit.setObjectName("blockInput")
-        self.block_name_edit.setPlaceholderText("e.g. Daily SCRUM")
-        name_row.addWidget(self.block_name_edit, stretch=1)
-        block_form.addLayout(name_row)
+        # Row 1 removed: Name is no longer used
 
         # Row 2: Project + Activity
         proj_act_row = QHBoxLayout()
@@ -1264,7 +1240,7 @@ class HolidayManagerWindow(QWidget):
         # Separator
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.Shape.HLine)
-        sep2.setStyleSheet("color: #45475a;")
+        sep2.setFrameShadow(QFrame.Shadow.Sunken)
         blocks_card_layout.addWidget(sep2)
 
         # Block list scroll
@@ -1349,7 +1325,7 @@ class HolidayManagerWindow(QWidget):
         # Separator
         sep3 = QFrame()
         sep3.setFrameShape(QFrame.Shape.HLine)
-        sep3.setStyleSheet("color: #45475a;")
+        sep3.setFrameShadow(QFrame.Shadow.Sunken)
         entries_card_layout.addWidget(sep3)
 
         # Scroll area for entry rows
@@ -1416,7 +1392,7 @@ class HolidayManagerWindow(QWidget):
         # Separator
         sep4 = QFrame()
         sep4.setFrameShape(QFrame.Shape.HLine)
-        sep4.setStyleSheet("color: #45475a;")
+        sep4.setFrameShadow(QFrame.Shadow.Sunken)
         projects_layout.addWidget(sep4)
 
         # Project list
@@ -1556,11 +1532,7 @@ class HolidayManagerWindow(QWidget):
         else:
             for block in blocks:
                 block_widget = QFrame()
-                block_widget.setStyleSheet(
-                    "QFrame { background: #1e1e2e; border: 1px solid #45475a; border-radius: 6px; padding: 6px; }"
-                    if block["enabled"]
-                    else "QFrame { background: #1e1e2e; border: 1px solid #313244; border-radius: 6px; padding: 6px; }"
-                )
+                block_widget.setFrameShape(QFrame.Shape.StyledPanel)
                 block_inner = QVBoxLayout(block_widget)
                 block_inner.setContentsMargins(8, 4, 8, 4)
                 block_inner.setSpacing(2)
@@ -1569,7 +1541,7 @@ class HolidayManagerWindow(QWidget):
                 top_row = QHBoxLayout()
                 top_row.setSpacing(6)
 
-                name_label = QLabel(block["name"])
+                name_label = QLabel(block["description"])
                 name_label.setObjectName("blockName" if block["enabled"] else "blockDisabled")
                 top_row.addWidget(name_label)
 
@@ -1671,12 +1643,12 @@ class HolidayManagerWindow(QWidget):
             show_box(self, QMessageBox.Icon.Warning, "Cannot Remove", str(exc))
 
     def add_time_block(self):
-        name = self.block_name_edit.text().strip()
         project = self.block_project_combo.currentText().strip()
         activity = self.block_activity_combo.currentText().strip()
         hours = self.block_hours_spin.value()
         minutes = self.block_minutes_spin.value()
         description = self.block_desc_edit.text().strip()
+        name = description  # Use description as the name in the database
 
         # Collect selected days
         selected_days = [str(idx) for idx, cb in self.day_checkboxes if cb.isChecked()]
@@ -1688,7 +1660,6 @@ class HolidayManagerWindow(QWidget):
         try:
             add_time_block(name, project, activity, hours, minutes, description, days_of_week)
             # Clear form
-            self.block_name_edit.clear()
             self.block_hours_spin.setValue(0)
             self.block_minutes_spin.setValue(30)
             self.block_desc_edit.clear()
@@ -1857,7 +1828,7 @@ class HolidayManagerWindow(QWidget):
                 label = QLabel(label_text)
                 label.setObjectName("projectName")
                 if name == default_proj:
-                    label.setStyleSheet("color: #f9e2af; font-weight: bold;")
+                    pass
                 row.addWidget(label, stretch=1)
 
                 if name != default_proj:
@@ -1904,7 +1875,7 @@ class HolidayManagerWindow(QWidget):
             show_box(self, QMessageBox.Icon.Warning, "Add Project", str(exc))
 
     def rename_project(self, old_name):
-        from PySide6.QtWidgets import QInputDialog
+        from PyQt6.QtWidgets import QInputDialog
         new_name, ok = QInputDialog.getText(self, "Rename Project", f"New name for '{old_name}':", text=old_name)
         if not ok or not new_name.strip():
             return
@@ -1967,6 +1938,8 @@ class ProjectDeleteDialog(QDialog):
         QRadioButton::indicator { width: 14px; height: 14px; border-radius: 7px; border: 1px solid #585b70; background: transparent; }
         QRadioButton::indicator:checked { background: #89b4fa; border: 1px solid #89b4fa; }
         QComboBox { background: #45475a; color: #cdd6f4; border: 1px solid #585b70; border-radius: 4px; padding: 4px 8px; }
+        QComboBox::drop-down { subcontrol-origin: padding; subcontrol-position: top right; width: 20px; border-left: none; }
+        QComboBox QAbstractItemView { background: #313244; color: #cdd6f4; selection-background-color: #45475a; border: 1px solid #585b70; border-radius: 4px; }
         QLineEdit { background: #45475a; color: #cdd6f4; border: 1px solid #585b70; border-radius: 4px; padding: 4px 8px; }
         QPushButton { background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; padding: 6px 16px; font-weight: 600; }
         QPushButton:hover { background: #585b70; }
@@ -1982,7 +1955,7 @@ class ProjectDeleteDialog(QDialog):
         
         self.setWindowTitle("Delete Project")
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
-        self.setStyleSheet(self.STYLE)
+        # self.setStyleSheet(self.STYLE)
         
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
@@ -2008,7 +1981,7 @@ class ProjectDeleteDialog(QDialog):
         
         self.radio_review = QRadioButton("Review entries day-by-day")
         review_lbl = QLabel(f"(Starts at {dates[0]})")
-        review_lbl.setStyleSheet("color: #6c7086; font-size: 11px;")
+        # review_lbl.setStyleSheet("color: #6c7086; font-size: 11px;")
         
         # Add to layout
         opt1 = QHBoxLayout()

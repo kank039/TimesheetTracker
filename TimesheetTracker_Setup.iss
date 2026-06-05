@@ -46,8 +46,8 @@ WizardStyle=modern dynamic
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
-Source: "D:\tmp\ts\dist\TimesheetTracker\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "D:\tmp\ts\dist\TimesheetTracker\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "D:\tmp\ts\dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+;Source: "D:\tmp\ts\dist\TimesheetTracker\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 
 [Registry]

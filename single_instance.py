@@ -1,7 +1,7 @@
 import os
 import tempfile
 
-from PySide6.QtCore import QLockFile
+from PyQt6.QtCore import QLockFile
 
 
 def acquire_single_instance_lock(app_name="TimesheetTracker"):
