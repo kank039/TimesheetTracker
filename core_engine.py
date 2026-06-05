@@ -209,21 +209,16 @@ def setup_database():
             PRIMARY KEY (block_id, insert_date)
         )
     ''')
-    # Add leave_name column if upgrading from an older schema
-    try:
-        cursor.execute("ALTER TABLE leaves ADD COLUMN leave_name TEXT DEFAULT ''")
-    except sqlite3.OperationalError:
-        pass  # column already exists
-    # Add days_of_week column if upgrading from an older schema
-    try:
-        cursor.execute("ALTER TABLE time_blocks ADD COLUMN days_of_week TEXT NOT NULL DEFAULT '0,1,2,3,4'")
-    except sqlite3.OperationalError:
-        pass  # column already exists
-    # Add is_default column to projects if upgrading from an older schema
-    try:
-        cursor.execute("ALTER TABLE projects ADD COLUMN is_default INTEGER DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass  # column already exists
+    def _add_column_if_not_exists(table, column, definition):
+        cursor.execute(f"PRAGMA table_info({table})")
+        columns = [row[1] for row in cursor.fetchall()]
+        if column not in columns:
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+    # Upgrade from older schemas
+    _add_column_if_not_exists("leaves", "leave_name", "TEXT DEFAULT ''")
+    _add_column_if_not_exists("time_blocks", "days_of_week", "TEXT NOT NULL DEFAULT '0,1,2,3,4'")
+    _add_column_if_not_exists("projects", "is_default", "INTEGER DEFAULT 0")
     conn.commit()
     conn.close()
     seed_company_holidays()

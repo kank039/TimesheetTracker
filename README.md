@@ -145,7 +145,7 @@ iscc TimesheetTracker_Setup.iss
 - **Added:** `days_of_week` field on time blocks — per-block day-of-week checkboxes (Mon–Fri).
 - **Added:** `update_time_block` engine function for editing existing blocks.
 - **Changed:** Time block insertion now respects the block's `days_of_week` — a SCRUM block set to Mon–Fri won't fire on a Wednesday if it's not in the list.
-- **Fixed:** Schema migration — `ALTER TABLE` guards silently add new columns to existing databases without data loss.
+- **Fixed:** Schema migration — PRAGMA checks safely add new columns to existing databases without hiding true SQL errors.
 
 ### [v1.2.0] — PyQt6 UI Rewrite
 - **Changed:** Replaced Tkinter and pystray with a single PyQt6 event loop.

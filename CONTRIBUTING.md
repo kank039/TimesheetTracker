@@ -167,18 +167,21 @@ Owns the `QApplication`, `QSystemTrayIcon`, and `QTimer`. Responsible for:
 
 ## 7. Database & Schema Migrations
 
-The `setup_database()` function uses **non-destructive `ALTER TABLE`** guards to add new columns to existing databases:
+The `setup_database()` function uses **schema introspection via PRAGMA** to add new columns to existing databases safely:
 
 ```python
-try:
-    cursor.execute("ALTER TABLE leaves ADD COLUMN leave_name TEXT DEFAULT ''")
-except sqlite3.OperationalError:
-    pass  # column already exists — safe to ignore
+def _add_column_if_not_exists(table, column, definition):
+    cursor.execute(f"PRAGMA table_info({table})")
+    columns = [row[1] for row in cursor.fetchall()]
+    if column not in columns:
+        cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+_add_column_if_not_exists("leaves", "leave_name", "TEXT DEFAULT ''")
 ```
 
 **When you add a new column to an existing table:**
 1. Add it to the `CREATE TABLE` statement (for fresh installs).
-2. Add a matching `ALTER TABLE ... ADD COLUMN` guard below the `conn.commit()` in `setup_database()`.
+2. Add a call to `_add_column_if_not_exists()` before `conn.commit()` in `setup_database()`.
 3. Never `DROP` or rename a column — just add new ones.
 
 ---
@@ -198,10 +201,7 @@ notes TEXT DEFAULT ''
 ```
 And add the migration guard:
 ```python
-try:
-    cursor.execute("ALTER TABLE timesheet ADD COLUMN notes TEXT DEFAULT ''")
-except sqlite3.OperationalError:
-    pass
+_add_column_if_not_exists("timesheet", "notes", "TEXT DEFAULT ''")
 ```
 
 **Step 2 — Core engine: logic**
