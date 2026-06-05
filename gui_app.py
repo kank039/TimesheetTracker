@@ -72,7 +72,11 @@ from core_engine import (
     setup_database,
     toggle_time_block,
     update_project,
+    get_ai_settings,
+    save_ai_settings,
 )
+
+import google.generativeai as genai
 
 def setup_persistence():
     if sys.platform != "win32":
@@ -1438,6 +1442,38 @@ class HolidayManagerWindow(QWidget):
         projects_layout.addWidget(proj_card, stretch=1)
         self.tabs.addTab(projects_tab, "📁  Manage Projects")
 
+        # ── AI Settings Tab ──
+        ai_tab = QWidget()
+        ai_layout = QVBoxLayout(ai_tab)
+        
+        ai_card = QFrame()
+        ai_card.setObjectName("card")
+        ai_card_layout = QVBoxLayout(ai_card)
+        
+        ai_title = QLabel("🤖 Gemini API Configuration")
+        ai_title.setObjectName("sectionTitle")
+        ai_card_layout.addWidget(ai_title)
+        
+        form_layout = QFormLayout()
+        self.ai_key_input = QLineEdit()
+        self.ai_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.ai_key_input.setPlaceholderText("Enter Gemini API Key")
+        form_layout.addRow("API Key:", self.ai_key_input)
+        
+        self.ai_enable_cb = QCheckBox("Enable Gemini Auto-fill")
+        form_layout.addRow("", self.ai_enable_cb)
+        
+        ai_card_layout.addLayout(form_layout)
+        
+        save_ai_btn = QPushButton("Save AI Settings")
+        save_ai_btn.setObjectName("addBtn")
+        save_ai_btn.clicked.connect(self._save_ai_settings)
+        ai_card_layout.addWidget(save_ai_btn)
+        ai_card_layout.addStretch(1)
+        
+        ai_layout.addWidget(ai_card, stretch=1)
+        self.tabs.addTab(ai_tab, "🤖 AI Settings")
+
         # ── Internal state for entry editor ──
         self.entry_rows = []
         self.entry_loading = False
@@ -1454,6 +1490,18 @@ class HolidayManagerWindow(QWidget):
         self._populate_personal_leaves()
         self._populate_time_blocks()
         self._populate_projects()
+        self._populate_ai_settings()
+
+    def _populate_ai_settings(self):
+        settings = get_ai_settings()
+        self.ai_key_input.setText(settings.get("api_key", ""))
+        self.ai_enable_cb.setChecked(settings.get("enable_autofill", False))
+
+    def _save_ai_settings(self):
+        api_key = self.ai_key_input.text().strip()
+        enable_autofill = self.ai_enable_cb.isChecked()
+        save_ai_settings(api_key, enable_autofill)
+        show_box(self, QMessageBox.Information, "Success", "AI Settings saved successfully.")
 
     def _clear_layout(self, layout):
         while layout.count():
@@ -2268,8 +2316,42 @@ class TimesheetController(QWidget):
 
         unlogged_hours = get_unlogged_hours(today_str)
         if unlogged_hours > 0:
-            dialog = ManualLogDialog(unlogged_hours, today_str, self)
-            dialog.exec()
+            ai_settings = get_ai_settings()
+            autofilled = False
+            if ai_settings.get("enable_autofill") and ai_settings.get("api_key"):
+                try:
+                    genai.configure(api_key=ai_settings["api_key"])
+                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    prompt = "I am a software developer. Please generate a short, typical 1-sentence description (under 50 chars) of what I might have worked on in the past hour. Do not include quotes."
+                    response = model.generate_content(prompt)
+                    ai_desc = response.text.strip()
+                    if not ai_desc:
+                        ai_desc = "Auto-filled task via AI."
+                    
+                    project = get_default_project()
+                    if not project:
+                        projects = get_projects()
+                        project = projects[0] if projects else "Default Project"
+                    
+                    activities = get_recent_activities()
+                    activity = activities[0] if activities else "Dev-Coding and Implementation"
+                    
+                    hours_to_log = int(unlogged_hours)
+                    if hours_to_log > MAX_HOURS_PER_ENTRY:
+                        hours_to_log = MAX_HOURS_PER_ENTRY
+                    if hours_to_log == 0:
+                        hours_to_log = 1
+                    
+                    add_timesheet_entry(project, activity, today_str, hours_to_log, 0, f"[AI] {ai_desc}")
+                    print(f"AI Autofilled: {ai_desc}")
+                    autofilled = True
+                    unlogged_hours = get_unlogged_hours(today_str)
+                except Exception as e:
+                    print(f"AI Auto-fill failed: {e}")
+
+            if unlogged_hours > 0 and not autofilled:
+                dialog = ManualLogDialog(unlogged_hours, today_str, self)
+                dialog.exec()
 
 
 def main(lock=None):

@@ -21,7 +21,7 @@ CURRENT_MODE = "Standard"
 IS_FIRST_RUN = False
 
 def determine_paths():
-    global CURRENT_MODE, IS_FIRST_RUN
+    global CURRENT_MODE, IS_FIRST_RUN, CONFIG_PATH
     
     local_config_path = os.path.join(base_dir, CONFIG_FILE)
     
@@ -30,6 +30,7 @@ def determine_paths():
         config.read(local_config_path)
         if config.has_section('Settings') and config.get('Settings', 'Mode', fallback='') == 'Portable':
             CURRENT_MODE = "Portable"
+            CONFIG_PATH = local_config_path
             return os.path.join(base_dir, "timesheet_brain.db")
 
     # 2. Try Standard Mode (%APPDATA%)
@@ -44,6 +45,7 @@ def determine_paths():
             
             CURRENT_MODE = "Standard"
             appdata_config_path = os.path.join(app_data_dir, CONFIG_FILE)
+            CONFIG_PATH = appdata_config_path
             
             if not os.path.exists(appdata_config_path):
                 IS_FIRST_RUN = True
@@ -58,6 +60,7 @@ def determine_paths():
         CURRENT_MODE = "Portable"
 
     # 3. Forced Portable Mode Fallback
+    CONFIG_PATH = local_config_path
     if not os.path.exists(local_config_path):
         IS_FIRST_RUN = True
         try:
@@ -69,7 +72,29 @@ def determine_paths():
 
     return os.path.join(base_dir, "timesheet_brain.db")
 
+CONFIG_PATH = None
 DB_NAME = determine_paths()
+
+def get_ai_settings():
+    config.read(CONFIG_PATH)
+    if not config.has_section('AI_Settings'):
+        return {"api_key": "", "enable_autofill": False}
+    return {
+        "api_key": config.get('AI_Settings', 'API_Key', fallback=''),
+        "enable_autofill": config.getboolean('AI_Settings', 'Enable_Autofill', fallback=False)
+    }
+
+def save_ai_settings(api_key, enable_autofill):
+    config.read(CONFIG_PATH)
+    if not config.has_section('AI_Settings'):
+        config.add_section('AI_Settings')
+    config.set('AI_Settings', 'API_Key', api_key)
+    config.set('AI_Settings', 'Enable_Autofill', str(enable_autofill))
+    try:
+        with open(CONFIG_PATH, 'w') as configfile:
+            config.write(configfile)
+    except PermissionError:
+        pass
 
 # Strict HR Parameters
 _DEFAULT_PROJECTS = ["RAM - Project Transcend 2026"]
