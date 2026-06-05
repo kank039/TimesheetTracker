@@ -76,7 +76,7 @@ from core_engine import (
     save_ai_settings,
 )
 
-import google.generativeai as genai
+from google import genai
 
 def setup_persistence():
     if sys.platform != "win32":
@@ -154,7 +154,7 @@ def ask_yes_no(parent, title, text):
 
 def export_timesheet(parent=None, prompt_for_path=True):
     if not os.path.exists(DB_NAME):
-        show_box(parent, QMessageBox.Warning, "Export", "Timesheet database not found.")
+        show_box(parent, QMessageBox.Icon.Warning, "Export", "Timesheet database not found.")
         return None
 
     conn = sqlite3.connect(DB_NAME)
@@ -164,7 +164,7 @@ def export_timesheet(parent=None, prompt_for_path=True):
     conn.close()
 
     if not rows:
-        show_box(parent, QMessageBox.Information, "Export", "Timesheet database is currently empty.")
+        show_box(parent, QMessageBox.Icon.Information, "Export", "Timesheet database is currently empty.")
         return None
 
     wb = Workbook()
@@ -210,10 +210,10 @@ def export_timesheet(parent=None, prompt_for_path=True):
 
     try:
         wb.save(export_path)
-        show_box(parent, QMessageBox.Information, "Export", f"Export successful!\n\nSaved to:\n{export_path}")
+        show_box(parent, QMessageBox.Icon.Information, "Export", f"Export successful!\n\nSaved to:\n{export_path}")
         return export_path
     except Exception as exc:
-        show_box(parent, QMessageBox.Critical, "Export Failed", f"Could not export the file.\n\n{exc}")
+        show_box(parent, QMessageBox.Icon.Critical, "Export Failed", f"Could not export the file.\n\n{exc}")
         return None
 
 
@@ -270,6 +270,11 @@ class ManualLogDialog(QDialog):
         layout.addLayout(form)
 
         button_row = QHBoxLayout()
+        
+        self.ai_fill_button = QPushButton("✨ Fill with AI")
+        self.ai_fill_button.clicked.connect(self.fill_with_ai)
+        button_row.addWidget(self.ai_fill_button)
+        
         button_row.addStretch(1)
 
         submit_button = QPushButton("Submit Log")
@@ -281,6 +286,40 @@ class ManualLogDialog(QDialog):
         button_row.addWidget(cancel_button)
 
         layout.addLayout(button_row)
+
+    def fill_with_ai(self):
+        ai_settings = get_ai_settings()
+        if not ai_settings.get("api_key"):
+            show_box(self, QMessageBox.Icon.Warning, "AI Auto-fill", "Please configure your Gemini API Key in the AI Settings tab first.")
+            return
+
+        self.ai_fill_button.setEnabled(False)
+        self.ai_fill_button.setText("✨ Thinking...")
+        QApplication.processEvents()
+
+        try:
+            client = genai.Client(api_key=ai_settings["api_key"])
+            prompt = ai_settings.get("ai_prompt", "").strip()
+            if not prompt:
+                prompt = "I am a software developer. Please generate a short, typical 1-sentence description (under 50 chars) of what I might have worked on in the past hour. Do not include quotes."
+            response = client.models.generate_content(
+                model='gemini-3.1-flash-lite',
+                contents=prompt,
+            )
+            ai_desc = response.text.strip()
+            
+            if ai_desc:
+                self.desc_edit.setText(f"[AI] {ai_desc}")
+            
+            if self.hours_spin.value() == 0 and self.minutes_spin.value() == 0:
+                self.hours_spin.setValue(1) 
+            
+            self.ai_fill_button.setText("✨ Fill with AI")
+            self.ai_fill_button.setEnabled(True)
+        except Exception as e:
+            show_box(self, QMessageBox.Icon.Critical, "AI Error", f"Failed to generate entry:\n{e}")
+            self.ai_fill_button.setText("✨ Fill with AI")
+            self.ai_fill_button.setEnabled(True)
 
     def populate_activity_combo(self):
         recent_activities = [activity for activity in get_recent_activities() if activity in VALID_ACTIVITIES]
@@ -303,19 +342,19 @@ class ManualLogDialog(QDialog):
         description = self.desc_edit.toPlainText().strip()
 
         if not description:
-            show_box(self, QMessageBox.Warning, "Warning", "Description cannot be empty.")
+            show_box(self, QMessageBox.Icon.Warning, "Warning", "Description cannot be empty.")
             return
 
         try:
             remaining_minutes = MAX_HOURS_PER_DAY * 60 - get_logged_minutes_for_day(self.today_str)
             total_minutes = hours * 60 + minutes
             if total_minutes <= 0:
-                show_box(self, QMessageBox.Warning, "Warning", "Specify a positive time to log.")
+                show_box(self, QMessageBox.Icon.Warning, "Warning", "Specify a positive time to log.")
                 return
             if total_minutes > remaining_minutes:
                 rem_h = remaining_minutes // 60
                 rem_m = remaining_minutes % 60
-                show_box(self, QMessageBox.Warning, "Warning", f"Only {rem_h}h {rem_m}m remain for today.")
+                show_box(self, QMessageBox.Icon.Warning, "Warning", f"Only {rem_h}h {rem_m}m remain for today.")
                 return
 
             minutes_left = total_minutes
@@ -329,14 +368,14 @@ class ManualLogDialog(QDialog):
             record_recent_activity(activity)
             total_now_min = get_logged_minutes_for_day(self.today_str)
             if total_now_min >= MAX_HOURS_PER_DAY * 60:
-                show_box(self, QMessageBox.Information, "Done for the day!", "You have worked enough for today.")
+                show_box(self, QMessageBox.Icon.Information, "Done for the day!", "You have worked enough for today.")
             else:
                 now_h = total_now_min // 60
                 now_m = total_now_min % 60
-                show_box(self, QMessageBox.Information, "Success", f"Logged {hours}h {minutes}m successfully! Total today: {now_h}h {now_m}m / {MAX_HOURS_PER_DAY}h")
+                show_box(self, QMessageBox.Icon.Information, "Success", f"Logged {hours}h {minutes}m successfully! Total today: {now_h}h {now_m}m / {MAX_HOURS_PER_DAY}h")
             self.accept()
         except Exception as exc:
-            show_box(self, QMessageBox.Critical, "Error", str(exc))
+            show_box(self, QMessageBox.Icon.Critical, "Error", str(exc))
 
 
 class DayEntryRow(QWidget):
@@ -558,7 +597,7 @@ class OldDayEditorDialog(QDialog):
 
     def remove_row(self, row):
         if len(self.rows) <= 1:
-            show_box(self, QMessageBox.Warning, "Edit Old Day", "Keep at least one task row for the day.")
+            show_box(self, QMessageBox.Icon.Warning, "Edit Old Day", "Keep at least one task row for the day.")
             return
 
         self.rows.remove(row)
@@ -636,10 +675,10 @@ class OldDayEditorDialog(QDialog):
             replace_timesheet_entries_for_day(date_str, entries)
             for activity in dict.fromkeys(entry["activity"] for entry in entries):
                 record_recent_activity(activity)
-            show_box(self, QMessageBox.Information, "Saved", f"Updated {date_str} successfully.")
+            show_box(self, QMessageBox.Icon.Information, "Saved", f"Updated {date_str} successfully.")
             self.accept()
         except Exception as exc:
-            show_box(self, QMessageBox.Critical, "Edit Old Day", str(exc))
+            show_box(self, QMessageBox.Icon.Critical, "Edit Old Day", str(exc))
 
 
 class HolidayManagerWindow(QWidget):
@@ -1460,6 +1499,11 @@ class HolidayManagerWindow(QWidget):
         self.ai_key_input.setPlaceholderText("Enter Gemini API Key")
         form_layout.addRow("API Key:", self.ai_key_input)
         
+        self.ai_prompt_input = QTextEdit()
+        self.ai_prompt_input.setPlaceholderText("I am a backend developer. Please generate a short, typical 1-sentence description (under 50 chars) of what I might have worked on in the past hour. Do not include quotes.")
+        self.ai_prompt_input.setFixedHeight(80)
+        form_layout.addRow("Custom Prompt:", self.ai_prompt_input)
+        
         self.ai_enable_cb = QCheckBox("Enable Gemini Auto-fill")
         form_layout.addRow("", self.ai_enable_cb)
         
@@ -1495,13 +1539,15 @@ class HolidayManagerWindow(QWidget):
     def _populate_ai_settings(self):
         settings = get_ai_settings()
         self.ai_key_input.setText(settings.get("api_key", ""))
+        self.ai_prompt_input.setPlainText(settings.get("ai_prompt", ""))
         self.ai_enable_cb.setChecked(settings.get("enable_autofill", False))
 
     def _save_ai_settings(self):
         api_key = self.ai_key_input.text().strip()
+        ai_prompt = self.ai_prompt_input.toPlainText().strip()
         enable_autofill = self.ai_enable_cb.isChecked()
-        save_ai_settings(api_key, enable_autofill)
-        show_box(self, QMessageBox.Information, "Success", "AI Settings saved successfully.")
+        save_ai_settings(api_key, enable_autofill, ai_prompt)
+        show_box(self, QMessageBox.Icon.Information, "Success", "AI Settings saved successfully.")
 
     def _clear_layout(self, layout):
         while layout.count():
@@ -1847,7 +1893,7 @@ class HolidayManagerWindow(QWidget):
 
     def _remove_entry_row(self, row):
         if len(self.entry_rows) <= 1:
-            show_box(self, QMessageBox.Warning, "Day Entries", "Keep at least one task row.")
+            show_box(self, QMessageBox.Icon.Warning, "Day Entries", "Keep at least one task row.")
             return
         self.entry_rows.remove(row)
         row.setParent(None)
@@ -1932,10 +1978,10 @@ class HolidayManagerWindow(QWidget):
             replace_timesheet_entries_for_day(date_str, entries)
             for activity in dict.fromkeys(e["activity"] for e in entries):
                 record_recent_activity(activity)
-            show_box(self, QMessageBox.Information, "Saved", f"Updated {date_str} successfully.")
+            show_box(self, QMessageBox.Icon.Information, "Saved", f"Updated {date_str} successfully.")
             self._load_entries_for_date()
         except Exception as exc:
-            show_box(self, QMessageBox.Critical, "Save Failed", str(exc))
+            show_box(self, QMessageBox.Icon.Critical, "Save Failed", str(exc))
 
     # ── Manage Projects tab actions ──
 
@@ -2230,9 +2276,9 @@ class TimesheetController(QWidget):
 
         message = f"Welcome to Timesheet Tracker!\n\nYou are running in {CURRENT_MODE} mode.\n"
         if CURRENT_MODE == "Portable":
-            show_box(self, QMessageBox.Warning, "First Run Setup", message + "\nDatabase and config are stored in the application folder.")
+            show_box(self, QMessageBox.Icon.Warning, "First Run Setup", message + "\nDatabase and config are stored in the application folder.")
         else:
-            show_box(self, QMessageBox.Information, "First Run Setup", message + "\nDatabase is stored in your Windows AppData folder.")
+            show_box(self, QMessageBox.Icon.Information, "First Run Setup", message + "\nDatabase is stored in your Windows AppData folder.")
 
     def _startup_insert_blocks(self):
         """Called once shortly after app launch to insert today's time blocks immediately."""
@@ -2247,7 +2293,7 @@ class TimesheetController(QWidget):
 
         remaining_minutes = MAX_HOURS_PER_DAY * 60 - get_logged_minutes_for_day(today_str)
         if remaining_minutes <= 0:
-            show_box(self, QMessageBox.Information, "All Good!", "You have 0 hours remaining for today.")
+            show_box(self, QMessageBox.Icon.Information, "All Good!", "You have 0 hours remaining for today.")
             return
 
         dialog = ManualLogDialog(remaining_minutes / 60.0, today_str, self)
@@ -2265,7 +2311,7 @@ class TimesheetController(QWidget):
             "Taking today off?\n\nThis will mute timesheet reminders for the rest of the day.",
         ):
             add_leave(today_str)
-            show_box(self, QMessageBox.Information, "Rest Up!", "Today is marked as leave. The tracker is muted until tomorrow.")
+            show_box(self, QMessageBox.Icon.Information, "Rest Up!", "Today is marked as leave. The tracker is muted until tomorrow.")
 
     def export_now(self):
         export_timesheet(self, prompt_for_path=True)
@@ -2306,7 +2352,7 @@ class TimesheetController(QWidget):
         today_str = now.strftime("%Y-%m-%d")
         if is_month_end_freeze(today_str):
             if now.hour == 10:
-                show_box(self, QMessageBox.Warning, "ALERT", "Portal freezes EOD today!")
+                show_box(self, QMessageBox.Icon.Warning, "ALERT", "Portal freezes EOD today!")
             elif now.hour == 18:
                 export_timesheet(self, prompt_for_path=False)
                 return
@@ -2320,10 +2366,14 @@ class TimesheetController(QWidget):
             autofilled = False
             if ai_settings.get("enable_autofill") and ai_settings.get("api_key"):
                 try:
-                    genai.configure(api_key=ai_settings["api_key"])
-                    model = genai.GenerativeModel('gemini-1.5-flash')
-                    prompt = "I am a software developer. Please generate a short, typical 1-sentence description (under 50 chars) of what I might have worked on in the past hour. Do not include quotes."
-                    response = model.generate_content(prompt)
+                    client = genai.Client(api_key=ai_settings["api_key"])
+                    prompt = ai_settings.get("ai_prompt", "").strip()
+                    if not prompt:
+                        prompt = "I am a software developer. Please generate a short, typical 1-sentence description (under 50 chars) of what I might have worked on in the past hour. Do not include quotes."
+                    response = client.models.generate_content(
+                        model='gemini-3.1-flash-lite',
+                        contents=prompt,
+                    )
                     ai_desc = response.text.strip()
                     if not ai_desc:
                         ai_desc = "Auto-filled task via AI."

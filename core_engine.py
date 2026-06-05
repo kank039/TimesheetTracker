@@ -78,18 +78,20 @@ DB_NAME = determine_paths()
 def get_ai_settings():
     config.read(CONFIG_PATH)
     if not config.has_section('AI_Settings'):
-        return {"api_key": "", "enable_autofill": False}
+        return {"api_key": "", "enable_autofill": False, "ai_prompt": ""}
     return {
         "api_key": config.get('AI_Settings', 'API_Key', fallback=''),
-        "enable_autofill": config.getboolean('AI_Settings', 'Enable_Autofill', fallback=False)
+        "enable_autofill": config.getboolean('AI_Settings', 'Enable_Autofill', fallback=False),
+        "ai_prompt": config.get('AI_Settings', 'AI_Prompt', fallback='')
     }
 
-def save_ai_settings(api_key, enable_autofill):
+def save_ai_settings(api_key, enable_autofill, ai_prompt):
     config.read(CONFIG_PATH)
     if not config.has_section('AI_Settings'):
         config.add_section('AI_Settings')
     config.set('AI_Settings', 'API_Key', api_key)
     config.set('AI_Settings', 'Enable_Autofill', str(enable_autofill))
+    config.set('AI_Settings', 'AI_Prompt', ai_prompt)
     try:
         with open(CONFIG_PATH, 'w') as configfile:
             config.write(configfile)
