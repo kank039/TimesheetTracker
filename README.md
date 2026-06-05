@@ -1,123 +1,177 @@
-⏰ Timesheet Tracker (v1.0)
-A lightweight, intelligent, and strictly-compliant background utility designed to automate timesheet logging. Built specifically to eliminate the friction of daily time tracking while adhering strictly to HR portal constraints.
+# ⏰ Timesheet Tracker
 
-Author: Kshitij
+> A lightweight, intelligent, and strictly-compliant background utility that automates daily timesheet logging — eliminating friction while adhering to HR portal constraints.
 
-Status: Production Ready (v1.0.0)
+**Author:** Kshitij  
+**Status:** Production Ready (`v4.0`)
 
-✨ Key Features
-🧠 Smart Accumulator: Tracks unlogged hours automatically between 10:00 AM and 7:00 PM. If you miss a prompt due to an emergency, it gracefully groups your missing hours and asks you to allocate them later.
+---
 
-🛡️ Portal-Compliant Validation: Hardcoded rules prevent portal rejection.
+## ✨ Key Features
 
-Maximum 3 hours per row.
+| Feature | Description |
+|---|---|
+| 🧠 **Smart Accumulator** | Tracks unlogged hours between 10 AM – 7 PM. Misses a prompt? It gracefully groups accumulated hours and asks you to allocate them later. |
+| 🛡️ **Portal-Compliant Validation** | Hardcoded rules prevent portal rejection: max 3 h per row, max 8 h per day, minutes are enforced. |
+| 🎉 **Auto-Sleep ("Go Home" Detection)** | Once 8 hours are logged, the daemon permanently sleeps for the rest of the day and shows a victory message. |
+| 🚨 **Month-End Freeze Alerts** | Calculates the last working weekday of the month and fires high-priority alerts at 10 AM and auto-exports at 6 PM. |
+| 🌴 **Out-of-Office (OOF) Mode** | Mark any day as leave from the tray menu — silences all reminders until tomorrow. |
+| 📅 **Holiday & Leave Manager** | Full UI panel showing company holidays, personal leaves, and time blocks. Open with a single left-click on the tray icon. |
+| 📦 **Project Manager** | Add, rename, and delete projects directly from the tray. Renaming cascades to all historical entries. |
+| ⏱️ **Time Blocks** | Define recurring auto-entries (e.g. "Daily SCRUM — 30 min, Mon–Fri"). Automatically inserted as real timesheet rows each qualifying day — idempotent and respects weekends/holidays. |
+| 📊 **One-Click Export** | Generates a perfectly-formatted Excel (`.xlsx`) matching the RAM – Project Transcend 2026 template. Choose where to save via a Qt file dialog. |
+| 🔒 **Single-Instance Guard** | A `QLockFile` prevents multiple copies of the app from running simultaneously. |
+| 🖥️ **PySide6 UI** | Native Qt dialogs and tray integration — no Tkinter flicker, no Windows Explorer save-dialog bugs. |
 
-Maximum 8 hours per day.
+---
 
-Minutes are strictly locked to 0.
+## 🛠️ Modes of Operation
 
-Weekends are automatically ignored.
+The app automatically adapts to your Windows environment and IT permissions.
 
-🎉 Auto-Sleep ("Go Home" Detection): The moment you hit 8 logged hours for the day, the background daemon permanently sleeps for the rest of the day and displays a victory message.
+### 1. Standard Mode *(default)*
+Data is stored in `%APPDATA%\TimesheetTracker\` — clean Desktop/Downloads, protected data even if you move the `.exe`.
 
-🚨 Month-End Freeze Alerts: Automatically calculates the final working weekday of the month and triggers high-priority alerts at 10:00 AM and 7:00 PM to ensure you submit before the portal locks.
+### 2. Portable Mode *(USB-friendly)*
+If `%APPDATA%` is blocked by IT, or you drop a `tracker_config.ini` next to the `.exe`, the app switches to Portable Mode and stores everything beside the executable.
 
-🌴 Out of Office (OOF) Mode: Use the Qt system tray menu to mark a day as "Personal Leave," completely silencing all reminders until tomorrow.
-
-📊 One-Click Export: Generates a perfectly formatted Excel (.xlsx) file matching the rigid RAM - Project Transcend 2026 template and lets you choose where to save it.
-
-🖥️ PySide6 UI: Uses native Qt dialogs and tray integration to avoid the Windows Explorer save-window issues seen in the Tkinter build.
-
-🛠️ Modes of Operation
-Timesheet Tracker automatically adapts to your Windows environment and IT permissions.
-
-1. Standard Mode (Default)
-If you run the application normally, it will securely install its SQLite database (timesheet_brain.db) and configuration file into your hidden Windows %APPDATA%\TimesheetTracker folder. This keeps your Desktop/Downloads folder clean and protects your data even if you delete or move the .exe.
-
-2. Portable Mode (USB Friendly)
-If your IT environment blocks %APPDATA%, or if you want to carry the app on a USB drive, the tracker falls back to Portable Mode. It will generate the database in the exact same folder as the .exe.
-
-Power User Tip: You can forcefully trigger Portable Mode by creating a file named tracker_config.ini next to the .exe containing the following lines:
-
-Ini, TOML
+**Force Portable Mode** by creating `tracker_config.ini`:
+```ini
 [Settings]
 Mode=Portable
-🚀 Installation & Usage
-Running the Executable
-Download TimesheetTracker.exe.
+```
 
-Double-click to run. On the very first run, a popup will inform you whether it installed in Standard or Portable mode.
+---
 
-The application will silently add itself to your Windows Startup (via Registry or Task Scheduler) so you never have to launch it manually again.
+## 🚀 Installation & Usage
 
-Look for the Blue Square Icon in your System Tray (near the clock/Wi-Fi).
+### Running the Installer
+1. Download and run `TimesheetTracker_Setup.exe`.
+2. On first launch a popup tells you whether Standard or Portable mode is active.
+3. The app registers itself in Windows Startup (Registry → Task Scheduler fallback) so it launches on every login.
+4. Look for the **Blue Square icon** in the system tray (near the clock/Wi-Fi).
 
-System Tray Controls
+### System Tray Controls
+
 Right-click the tray icon to access:
 
-Manual Log:
-Log Today: Force a log entry for the current day (great for bulk-logging 8 hours at once).
-Edit Old Day: Open a date-based editor for past entries so you can fix spelling mistakes or rebalance hours.
+| Menu Item | What it does |
+|---|---|
+| **Manual Log → Log Today** | Force-open the log dialog for the current day. Time blocks are pre-applied before calculating remaining time. |
+| **Manual Log → Edit Old Day** | Date-picker editor for past entries. Must still total 8 h; no single row may exceed 3 h. |
+| **Mark Today as Leave (OOF)** | Marks today as Personal Leave — silences all reminders until tomorrow. |
+| **Manage Projects** | Add / rename / delete projects. A project with existing entries cannot be deleted. |
+| **Export** | Opens a save-file dialog and writes the Excel export. Does **not** clear the database. |
+| **Quit** | Force-closes the background daemon and hides the tray icon. |
 
-Old-day edits must still total 8 hours for the selected date, and no single row can exceed 3 hours.
+Left-click the tray icon to open the **Holidays, Leaves & Time Blocks** panel.
 
-Mark Today as Leave (OOF): Silence the tracker for sick days or PTO.
+---
 
-Export: Generate the Excel (.xlsx) file for the HR portal without clearing the database, so older entries remain available for future exports. Manual export now lets you choose the save location.
+## ⏱️ Time Blocks
 
-Quit: Force close the background daemon.
+Time blocks are recurring timesheet entries that are automatically inserted at the start of each qualifying day.
 
-Building from Source
-If you wish to modify the code and compile it yourself:
+- Each block has: **Name**, **Project**, **Activity**, **Duration** (h / m), **Description**, and **Days of Week** (Mon–Fri checkboxes).
+- Blocks are only inserted on working days (weekdays that are not leaves or company holidays).
+- A block is skipped if today's total logged time would exceed 8 h.
+- Insertions are tracked in `time_block_insertions` — re-running is idempotent.
+- You can **enable / disable** a block without deleting it, using the toggle button.
 
-Bash
-# 1. Install dependencies
-pip install pandas PySide6 pyinstaller openpyxl
+---
 
-# 2. Compile to a single .exe
-pyinstaller --noconsole --onefile --name "TimesheetTracker" --icon=app.ico --version-file=version.txt main.py
-<!-- pyinstaller --noconsole --onefile --name "TimesheetTracker" main.py -->
-📝 Changelog
-[v1.2.0] - PySide6 UI Rewrite
-Changed: Replaced Tkinter and pystray with a single PySide6 event loop.
+## 🗃️ Database Schema
 
-Changed: Export now opens a save dialog so you can choose the destination for the Excel file.
+The SQLite database (`timesheet_brain.db`) lives in `%APPDATA%\TimesheetTracker\` (Standard) or beside the `.exe` (Portable).
 
-Changed: Export success and error dialogs now use Qt-native modal windows.
+| Table | Purpose |
+|---|---|
+| `timesheet` | All logged time entries |
+| `recent_activities` | Last-used activities for smart ordering in the UI |
+| `leaves` | Personal leaves **and** company holidays (`leave_type` differentiates them) |
+| `projects` | User-managed project list |
+| `time_blocks` | Recurring block definitions |
+| `time_block_insertions` | Idempotency guard — records which blocks were already inserted on which dates |
 
-[v1.0.0] - Production Release
-Added: Multi-tier Windows startup persistence (Registry injection with Task Scheduler fallback).
+---
 
-Added: Dynamic routing for SQLite database (Standard %APPDATA% vs. Portable mode).
+## 📁 File Structure
 
-Added: tracker_config.ini generation for explicit environment overrides.
+```
+TimesheetTracker/
+├── main.py                     # Entry point — acquires single-instance lock, launches GUI
+├── single_instance.py          # QLockFile-based single-instance guard
+├── core_engine.py              # All business logic, DB, validation, and date helpers
+├── gui_app.py                  # PySide6 UI: tray, dialogs, and the background daemon loop
+├── app.ico                     # Application icon
+├── version.txt                 # PyInstaller version resource file
+├── pyproject.toml              # uv / pip project manifest with dependencies
+├── TimesheetTracker.spec       # PyInstaller spec file for reproducible builds
+├── TimesheetTracker_Setup.iss  # Inno Setup installer script
+├── _test_seed.py               # Manual smoke-test for leave/holiday seeding
+└── _test_time_blocks.py        # Manual smoke-test for time block insertion
+```
 
-Added: First-run initialization popups to inform users of their installation mode.
+---
 
-[v0.9.0] - The "Quality of Life" Update
-Added: System Tray integration for silent background operation.
+## 🔧 Building from Source
 
-Added: "Mark Today as Leave" feature to bypass the 8-hour expected daily quota.
+> See [CONTRIBUTING.md](CONTRIBUTING.md) for the full developer setup guide.
 
-Added: Custom GUI dialogs that force themselves to the front of the screen.
+**Quick build:**
 
-Changed: Background daemon now runs in the main Qt event loop to prevent UI locking.
+```bash
+# 1. Install dependencies (using uv — recommended)
+uv sync
 
-[v0.8.0] - Smart Accumulation & Victory Conditions
-Added: "Go Home" auto-sleep detection. The script stops prompting entirely once 8 hours are logged.
+# 2. Run from source
+uv run python main.py
 
-Added: Expected hours calculation based on a strict 10:00 AM to 7:00 PM operating window.
+# 3. Compile to a single .exe
+uv run pyinstaller TimesheetTracker.spec
 
-Added: Month-end portal freeze detection logic (get_last_working_day).
+# 4. Package the installer (requires Inno Setup installed)
+iscc TimesheetTracker_Setup.iss
+```
 
-[v0.5.0] - Core Engine Implementation
-Added: SQLite integration for robust local data storage.
+---
 
-Added: Strict data validation (Weekends blocked, Max 3 hours per row limit, forced 0 minutes).
+## 📝 Changelog
 
-Added: Automated CSV mapping to format dates rigidly to dd-MM-yyyy.
+### [v4.0] — Project Manager & Time Block Day Selector
+- **Added:** `ProjectManagerDialog` — full CRUD UI for projects (add, rename, delete) accessible from the tray.
+- **Added:** `days_of_week` field on time blocks — per-block day-of-week checkboxes (Mon–Fri).
+- **Added:** `update_time_block` engine function for editing existing blocks.
+- **Changed:** Time block insertion now respects the block's `days_of_week` — a SCRUM block set to Mon–Fri won't fire on a Wednesday if it's not in the list.
+- **Fixed:** Schema migration — `ALTER TABLE` guards silently add new columns to existing databases without data loss.
 
-[v0.1.0] - Initial Prototype
-Added: Basic CLI flow and Pandas export logic.
+### [v1.2.0] — PySide6 UI Rewrite
+- **Changed:** Replaced Tkinter and pystray with a single PySide6 event loop.
+- **Changed:** Export now opens a Qt save dialog so you can choose the destination.
+- **Changed:** Export success and error dialogs use Qt-native modal windows.
 
-Added: Rigid column headers (Project, Activity, Date, etc.) mapped to the RAM - Project Transcend 2026 template.
+### [v1.0.0] — Production Release
+- **Added:** Multi-tier Windows startup persistence (Registry → Task Scheduler fallback).
+- **Added:** Dynamic path routing for SQLite (Standard `%APPDATA%` vs. Portable mode).
+- **Added:** `tracker_config.ini` generation for explicit environment overrides.
+- **Added:** First-run initialization popups to inform users of their installation mode.
+
+### [v0.9.0] — Quality of Life Update
+- **Added:** System tray integration for silent background operation.
+- **Added:** "Mark Today as Leave" feature to bypass the 8-hour daily quota.
+- **Added:** Custom Qt dialogs that force themselves to the front of the screen.
+- **Changed:** Background daemon now runs in the main Qt event loop to prevent UI locking.
+
+### [v0.8.0] — Smart Accumulation & Victory Conditions
+- **Added:** "Go Home" auto-sleep detection — stops prompting once 8 hours are logged.
+- **Added:** Expected hours calculation based on a strict 10 AM – 7 PM operating window.
+- **Added:** Month-end portal freeze detection (`get_last_working_day`).
+
+### [v0.5.0] — Core Engine
+- **Added:** SQLite integration for robust local data storage.
+- **Added:** Strict data validation (weekends blocked, max 3 h/row, forced 0 minutes).
+- **Added:** Automated CSV mapping with dates formatted as `dd-MM-yyyy`.
+
+### [v0.1.0] — Initial Prototype
+- **Added:** Basic CLI flow and Pandas export logic.
+- **Added:** Rigid column headers (`Project`, `Activity`, `Date`, etc.) mapped to the RAM – Project Transcend 2026 template.
